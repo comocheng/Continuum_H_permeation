@@ -457,6 +457,9 @@ def level5_model_wrapper(params_dict, return_full_record=False):
             'grain_shape':           full_params['grain_shape'],
             'gb_type':               full_params['gb_type'],
             'gb_thickness':          gb_thickness,
+            # the sampled E_D, so the GB enhancement moves with it (it used to
+            # read the config's E_D whatever the SA drew)
+            'Q_bulk':                full_params['E_D'],
         }
 
         f_pin = full_params.get('f_pinhole', 0.0)
@@ -771,6 +774,7 @@ def level5L6_model_wrapper(params_dict, return_full_record=False):
             'grain_shape':  full_params.get('grain_shape', 'equiaxed'),
             'gb_type':      full_params.get('gb_type', 'LAGB'),
             'gb_thickness': full_params['gb_thickness'],
+            'Q_bulk':       full_params['E_D'],   # see level5_model_wrapper
         }
         include_gb = full_params.get('enable_gb_enhancement', True)
 

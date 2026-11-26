@@ -229,6 +229,15 @@ overrides the geometry.
       messages. On the current presets and log-uniform ranges no draw fails.
       `tests/test_sa_failures.py`.
 
+- [x] **The GB enhancement ignored the sampled `E_D` (review item 7).**
+      `gb_enhancement_factor` read `METALS[...]['E_D']`, so on every SA draw the lattice
+      diffusivity used the sampled `E_D` and the grain-boundary term used the config's.
+      **Fixed:** `Q_bulk` is an optional override, passed through `metal_diffusivity` in
+      `microstructure_params`, and both wrappers pass the sampled `E_D`. No pinned
+      number moves. With LAGB boundaries the enhancement is clamped to ~1x, so in the
+      shipped studies this changes almost nothing; that is a separate microstructure
+      question (the 316L and Incoloy values are copied from Hastelloy N).
+
 ## Test coverage
 
 - [x] **Physics test suite.** The model wrappers are pinned only by the 13 values in the

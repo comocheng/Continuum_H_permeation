@@ -52,7 +52,8 @@ References
 
 
 
-def gb_enhancement_factor(temperature, temperature_unit='K', gb_type='HAGB', data_source='default'):
+def gb_enhancement_factor(temperature, temperature_unit='K', gb_type='HAGB', data_source='default',
+                          Q_bulk=None):
     r"""
     Calculate grain boundary diffusion enhancement factor D_gb/D_bulk.
     
@@ -120,6 +121,13 @@ def gb_enhancement_factor(temperature, temperature_unit='K', gb_type='HAGB', dat
         - a dict: an explicit table, ``{T_celsius: enhancement_factor}``, interpolated
           in log space. Note ``np.interp`` clamps outside the supplied range rather
           than extrapolating, so the nearest endpoint is returned there.
+
+    Q_bulk : float, optional
+        Lattice activation energy [J/mol] to use instead of the active metal's
+        ``E_D``, with ``data_source='default'``. The SA wrappers pass the sampled
+        ``E_D`` here; without it the GB term kept the config value while the
+        lattice diffusivity used the sampled one, so a sampled ``E_D`` never
+        reached the enhancement.
     
     Returns
     -------
@@ -204,7 +212,8 @@ def gb_enhancement_factor(temperature, temperature_unit='K', gb_type='HAGB', dat
         PREFACTOR_RATIO = 1.0   # A = D0_gb / D0_bulk
 
         metal  = METALS[ACTIVE_METAL]
-        Q_bulk = metal['E_D']
+        if Q_bulk is None:
+            Q_bulk = metal['E_D']
 
         # D_gb/D_bulk = A exp[(Q_bulk - Q_gb)/RT], with Q_gb = Q_RATIO * Q_bulk
         base_enhancement = PREFACTOR_RATIO * np.exp(
@@ -305,7 +314,7 @@ def gb_enhancement_factor(temperature, temperature_unit='K', gb_type='HAGB', dat
 
 def calculate_gb_enhanced_diffusivity(D_bulk, temperature, grain_size, 
                                      gb_thickness=0.5e-9, gb_type='HAGB', 
-                                     model='parallel'):
+                                     model='parallel', Q_bulk=None):
     r"""
     Calculate effective diffusivity with grain boundary fast diffusion paths.
     
@@ -383,6 +392,10 @@ def calculate_gb_enhanced_diffusivity(D_bulk, temperature, grain_size,
         Diffusion model:
         - 'parallel': Simple parallel path model (default)
         - 'hart': Hart equation with connectivity
+
+    Q_bulk : float, optional
+        Lattice activation energy [J/mol]; passed to :func:`gb_enhancement_factor`.
+        Defaults to the active metal's ``E_D``.
     
     Returns
     -------
@@ -486,7 +499,8 @@ def calculate_gb_enhanced_diffusivity(D_bulk, temperature, grain_size,
     gb_result = gb_enhancement_factor(
         temperature=temperature,
         temperature_unit='K',
-        gb_type=gb_type
+        gb_type=gb_type,
+        Q_bulk=Q_bulk,
     )
     enhancement_factor = gb_result['enhancement_factor']
     
@@ -566,9 +580,10 @@ def metal_diffusivity(D_lattice, temperature, microstructure_params,
     temperature : float
         Temperature [K]
     microstructure_params : dict
-        Needs ``grain_size`` and ``gb_type``; ``gb_thickness`` (default 0.5 nm)
-        and ``model`` (``'parallel'`` or ``'hart'``, default ``'parallel'``) are
-        optional.
+        Needs ``grain_size`` and ``gb_type``; ``gb_thickness`` (default 0.5 nm),
+        ``model`` (``'parallel'`` or ``'hart'``, default ``'parallel'``) and
+        ``Q_bulk`` (lattice activation energy, default the active metal's
+        ``E_D``) are optional.
     enable_gb_enhancement : bool, optional
         False returns ``D_lattice`` unchanged. Default True.
 
@@ -586,4 +601,5 @@ def metal_diffusivity(D_lattice, temperature, microstructure_params,
         gb_thickness=microstructure_params.get('gb_thickness', 0.5e-9),
         gb_type=microstructure_params['gb_type'],
         model=microstructure_params.get('model', 'parallel'),
+        Q_bulk=microstructure_params.get('Q_bulk'),
     )['D_eff']
