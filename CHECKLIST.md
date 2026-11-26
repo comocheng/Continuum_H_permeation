@@ -137,12 +137,15 @@ overrides the geometry.
       Changes no number: the gate passes unchanged on all four studies and
       `worked_values --check` is clean. `pressure_range` is left alone — nothing reads it
       for either material, so renaming it would be churn without a consumer.
-- [ ] **The preset yields quoted in `study_config.py` are stale.** The comment above
+- [x] **The preset yields quoted in `study_config.py` are stale.** The comment above
       `REGIME_PRESETS_L5` claims `metal 97.0%, oxide 77.7%, defect 87.3%`; measured today
       they are 34%, 78%, 100% (150 draws, seed 42). Unchanged by the geometry fix —
       verified by probing before and after — so the comment simply predates other work.
       `size_draws_for_target()` measures yields at run time, so nothing depends on the
       comment being right, but it reads as authoritative.
+      **Closed 2026-11-26:** the numbers are no longer in any `study_config.py`. Measured
+      yields are printed by the SA notebooks (Phase 1); under log-uniform sampling they
+      are e.g. 316L L5 oxide 54-67%, metal 38-65%, defect 76-95%.
 - [ ] **Oxide properties are extrapolated ~500 K past their validated ceiling, silently.**
       The Cr₂O₃ data carry `temperature_range = [473, 773]` K; the SA sweeps to 1273 K.
       `get_oxide_properties_at_T` warns, but the level-5 wrappers — the ones the SA
@@ -320,7 +323,7 @@ overrides the geometry.
 
 ## Repository hygiene
 
-- [ ] **The Guo SA notebooks' stored outputs predate the geometry re-baseline.** Merging
+- [x] **The Guo SA notebooks' stored outputs predate the geometry re-baseline.** Merging
       `fix/eta-surf-not-default` brought re-executed copies of `sensitivity_regime_L5`,
       `sensitivity_regime_L5L6` and both `regime_parallel_coords*`, but that branch forked
       at `0c264dd`, before `acfe540` made `CONDITIONS` own the oxide geometry — so they
@@ -330,6 +333,12 @@ overrides the geometry.
       The committed outputs are now stale in both copies and a correct set needs a real
       re-execution, which is hours per notebook — the L5L6 773 K oxide preset alone draws
       >100k samples.
+      **Done 2026-11-26** on branch `sensitivity-analysis`: `sensitivity_regime_L5` and
+      `_L5L6` re-run in `Guo_etal_2025/`, `Fuerst_et_al_2024/` and `incoloy802_cr2o3/`
+      (which also replaces the Fuerst and Incoloy copies that held another study's
+      outputs), ~16-20 min each with the parallel SA. The `regime_parallel_coords*`
+      notebooks ran cleanly and stay committed without outputs. `Application/` keeps
+      its older, pre-isothermal notebooks; they were not re-run.
 
 - [x] **`docs/two-models` is unmerged**, 8 commits ahead of `main`, and edits two of the
       same documentation pages as the current branch — `docs/api/config.md` and
