@@ -218,6 +218,17 @@ overrides the geometry.
       In a 6000-draw log-uniform L5 scan, 15 rows had been wrong by up to 11.8 decades
       and had changed regime. `tests/test_interface_solver.py`; the gate is unchanged.
 
+- [x] **SA failures were masked (review item 5).** Both wrappers caught every exception,
+      printed a traceback and returned `flux = 1e-20`, i.e. -20 on the log10 scale the
+      indices use; the row was then dropped from the clusters without a count. In L5L6 a
+      NaN path flux made `J_total` NaN and every flux weight 0, and `argmax(0, 0, 0)`
+      labelled the row `surface`.
+      **Fixed:** a failure returns NaN outputs, `regime='undefined'` and an `error`
+      message, and warns. A non-finite total flux is a failure. `run_global_lhs_scan`
+      records the `error` column and always prints a failure count with the commonest
+      messages. On the current presets and log-uniform ranges no draw fails.
+      `tests/test_sa_failures.py`.
+
 ## Test coverage
 
 - [x] **Physics test suite.** The model wrappers are pinned only by the 13 values in the

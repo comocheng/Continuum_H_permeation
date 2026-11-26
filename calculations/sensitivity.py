@@ -294,6 +294,29 @@ def check_against_config(raise_on_fail=True, verbose=True):
                          + "\n  ".join(problems))
     return problems
 
+def _failed_record(wrapper_name, exc, full_params, return_full_record,
+                   numeric, labels):
+    """The record a wrapper returns when the model raises: NaN, not a sentinel.
+
+    Outputs are NaN so a failure can never be mistaken for a real, tiny flux --
+    the old 1e-20 sentinel became -20 on the log10 scale the indices use -- and
+    ``regime`` is 'undefined' so the row joins no cluster. ``error`` carries the
+    message; run_global_lhs_scan counts and reports these rather than letting
+    them vanish from the clusters unannounced.
+    """
+    import warnings
+    msg = f"{type(exc).__name__}: {exc}"
+    warnings.warn(f"{wrapper_name} failed: {msg}", RuntimeWarning, stacklevel=3)
+    record = {k: np.nan for k in numeric}
+    record['temperature'] = full_params.get('temperature', np.nan)
+    record['regime'] = 'undefined'
+    record['error'] = msg
+    if return_full_record:
+        for k in labels:
+            record[k] = 'error'
+    return record
+
+
 # =============================================================================
 # MODEL WRAPPER — LEVEL 5
 # =============================================================================
@@ -478,6 +501,9 @@ def level5_model_wrapper(params_dict, return_full_record=False):
 
         flux_total = result_l5['flux_total']
         flux_bare  = result_bare['flux']
+        if not (np.isfinite(flux_total) and np.isfinite(flux_bare)):
+            raise FloatingPointError(
+                f"non-finite flux (total {flux_total!r}, bare metal {flux_bare!r})")
         PRF        = flux_bare / flux_total if flux_total > 0 else float('inf')
         D_eff      = result_l5.get('D_eff_metal', D_metal)
 
@@ -546,22 +572,11 @@ def level5_model_wrapper(params_dict, return_full_record=False):
         return record
 
     except Exception as e:
-        print(f"Error in Level 5 model: {e}")
-        import traceback; traceback.print_exc()
-        record = {
-            'flux': 1e-20, 'PRF': 1.0, 'D_eff': 1e-12, 'D_modification': 1.0,
-            'permeability': 1e-20, 'permeance': 1e-20, 'P_interface': 0,
-            'flux_intact': 1e-20, 'flux_defect': 0, 'flux_bare_metal': 1e-20,
-            'frac_oxide': np.nan, 'frac_metal': np.nan, 'frac_defect': np.nan,
-            'regime': 'undefined',
-            'D_metal': 1e-12, 'K_s_metal': 1e-6, 'D_ox': 1e-15, 'K_ox': 1e-10,
-            'temperature': full_params.get('temperature', 1073.15),
-            'modification_factor': 1.0, 'defect_enhancement': 1.0,
-        }
-        if return_full_record:
-            record['regime_hierarchy'] = 'error'
-            record['dominant_path']    = 'error'
-        return record
+        return _failed_record(
+            'level5_model_wrapper', e, full_params, return_full_record,
+            numeric=SCAN_OUTPUT_FIELDS_L5 + ['D_metal', 'K_s_metal', 'D_ox', 'K_ox',
+                                             'modification_factor', 'defect_enhancement'],
+            labels=('regime_hierarchy', 'dominant_path'))
 
 
 # =============================================================================
@@ -789,6 +804,16 @@ def level5L6_model_wrapper(params_dict, return_full_record=False):
             K_eq_metal=K_eq_metal,
         )
 
+        if not np.isfinite(r['J_total']):
+            # A path whose coverage solve failed returns flux = NaN, which makes
+            # J_total NaN and every flux weight 0 -- and argmax over (0, 0, 0)
+            # labelled the row 'surface'. Treat it as the failure it is.
+            failed = [k for k, d in r.get('defect_paths', {}).items()
+                      if not np.isfinite(d['path_result']['flux'])]
+            if not np.isfinite(r['intact_path']['flux']):
+                failed.insert(0, 'intact')
+            raise FloatingPointError(f"non-finite J_total; failed path(s): {failed}")
+
         fw           = r.get('flux_weighted_resistances', {})
         intact_theta = r.get('intact_path', {}).get('theta', np.nan)
 
@@ -872,24 +897,11 @@ def level5L6_model_wrapper(params_dict, return_full_record=False):
         return record
 
     except Exception as e:
-        print(f"Error in Level 5L6 model: {e}")
-        import traceback; traceback.print_exc()
-        record = {
-            'flux': 1e-20, 'PRF': np.nan, 'D_eff': 1e-12, 'D_modification': np.nan,
-            'permeability': 1e-20, 'permeance': 1e-20,
-            'Phi_transport': np.nan, 'eta_surf': np.nan, 'P_interface': np.nan,
-            'flux_intact': 1e-20, 'flux_defect': 0.0,
-            'frac_surface': np.nan, 'frac_oxide': np.nan, 'frac_metal': np.nan,
-            'theta': np.nan, 'D_metal': 1e-12, 'K_s_metal': 1e-6,
-            'D_ox': 1e-15, 'K_ox': 1e-10, 'k_diss': 1e-15, 'K_eq': 1e-10,
-            'k_diss_metal': 1e-12, 'K_eq_metal': 1e-8,
-            'temperature': full_params.get('temperature', 1073.15),
-            'regime': 'undefined',
-        }
-        if return_full_record:
-            record['system_rate_limiting'] = 'error'
-            record['dominant_path']        = 'error'
-        return record
+        return _failed_record(
+            'level5L6_model_wrapper', e, full_params, return_full_record,
+            numeric=SCAN_OUTPUT_FIELDS + ['D_metal', 'K_s_metal', 'D_ox', 'K_ox',
+                                          'k_diss', 'K_eq', 'k_diss_metal', 'K_eq_metal'],
+            labels=('system_rate_limiting', 'dominant_path'))
 
 
 # =============================================================================
@@ -1125,11 +1137,23 @@ def run_global_lhs_scan(param_ranges, N, seed=42, wrapper=None,
             row[f] = rec.get(f, np.nan)
         for f in label_fields:
             row[f] = rec.get(f, 'undefined')
+        row['error'] = rec.get('error', '')
         rows.append(row)
         if verbose and ((i + 1) % max(1, n // 10) == 0 or (i + 1) == n):
             print(f"  scan {i + 1}/{n} ({(i + 1) / n * 100:.0f}%)")
 
     df = pd.DataFrame(rows)
+
+    # Reported whatever `verbose` says: a failed draw joins no cluster, so a
+    # silent failure would bias the clusters towards the parameter combinations
+    # the solver happens to handle.
+    n_fail = int((df['error'] != '').sum())
+    if n_fail:
+        top = df.loc[df['error'] != '', 'error'].value_counts().head(3)
+        print(f"  WARNING  {n_fail}/{n} draws failed ({n_fail / n:.2%}) and are "
+              f"labelled 'undefined'. Most common:")
+        for m_, c_ in top.items():
+            print(f"    {c_:6d} x {m_[:160]}")
 
     if save_path:
         _save_scan(df, save_path)
@@ -1380,6 +1404,8 @@ def load_regime_scans(save_dir, regimes=('metal', 'surface', 'oxide')):
     for r in regimes:
         path = os.path.join(save_dir, f'scan_{r}.csv')
         df = pd.read_csv(path)
+        # '' round-trips through CSV as NaN; scans older than the column lack it
+        df['error'] = df['error'].fillna('') if 'error' in df else ''
         scans[r] = df
         clusters[r] = df[df['regime'] == r].reset_index(drop=True)
     master = pd.concat([clusters[r] for r in regimes], ignore_index=True)

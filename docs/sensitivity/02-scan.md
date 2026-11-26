@@ -75,7 +75,7 @@ variability, so it is an argument.
 |---|---|
 | A parameter in both `fixed_params` and `param_ranges` | Refused. The two would contradict each other. |
 | A log-sampled range with a lower bound ≤ 0 | Refused. Add the name to `LINEAR_SAMPLED_PARAMS` if it belongs on a linear scale. |
-| Many `undefined` rows | Failed solves. Dropped at stage 3 and reported separately; a large count means the ranges reach unphysical combinations. |
+| `WARNING  n/N draws failed` | Failed solves. Their outputs are NaN (never a sentinel value), `regime` is `undefined`, and the `error` column holds the exception. They are dropped at stage 3; a large count means the ranges reach unphysical combinations, and because they join no cluster, failures concentrated in one corner of the space bias the clusters. |
 | One regime holds almost every row | Expected on the default ranges. Not a fault — go to stage 4. |
 | `flux` spanning ten decades | Expected. It is why the indices are computed on `log10` — `LOG_METRICS_DEFAULT`. |
 | Silent extrapolation beyond the measured temperature window | The wrappers do not re-raise it. The sensitivity ranges extrapolate much further than a single run; {doc}`../caveats`. |
