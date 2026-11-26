@@ -68,10 +68,17 @@ overrides the geometry.
 
 ## Known defects, not yet scheduled
 
-- [ ] **Four SA defaults lie outside their own sweep ranges** — `D_ref`,
+- [x] **Four SA defaults lie outside their own sweep ranges** — `D_ref`,
       `k_diss_metal_ref`, `E_diss_metal`, in the 316L study only. The sensitivity analysis
       therefore never evaluates the nominal case for those parameters. Either the default
       or the range is wrong; `check_against_config()` has reported this for some time.
+      **Fixed: the ranges were wrong.** They were Incoloy 802's (the comment said so),
+      copied into the 316L study and its `Application/` copy. `D_ref` and
+      `k_diss_metal_ref` are now +/- 2 decades about the 316L defaults, as the other
+      studies do for theirs, and `E_D` / `E_diss_metal` +/- 15 kJ/mol. The two preset
+      overrides that hard-coded Incoloy numbers (`_SA_FAST_METAL` `D_ref`,
+      `_SA_SLOW_SURFACE` `k_diss_metal_ref`) moved with them. `check_against_config()`
+      is clean on all four studies.
 - [x] **`REQUIRED_EXPORTS` was incomplete — five names, not one.** It omitted
       `get_surface_kinetics_from_config` (imported at module level by
       `surface_kinetics.py`), plus `R`, `F`, `apply_style` and

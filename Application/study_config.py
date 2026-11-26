@@ -93,9 +93,12 @@ OXIDE_DEFECTS = {
 # SUGGESTED PARAMETER RANGES — Level 5 (19 parameters)   ** TUNE ME **
 # -----------------------------------------------------------------------------
 SUGGESTED_RANGES_LEVEL5 = {
-    # Metal transport (Incoloy 802, Schmidt 1985)
-    'D_ref':        [4.285e-11, 4.285e-7],
-    'E_D':          [50000, 80000],
+    # Metal transport (316L, Guo 2025). Pre-exponential +/- 2 decades and
+    # activation energy +/- 15 kJ/mol about the METALS defaults (2.8e-11 m2/s,
+    # 52.1 kJ/mol at T_ref = 673 K). These were the Incoloy 802 ranges, which put
+    # the 316L default D_ref below the bottom of its own range.
+    'D_ref':        [2.8e-13, 2.8e-9],
+    'E_D':          [37000, 67000],
     'K_s_ref':      [1e-4, 0.1],
     'H_s':          [1000, 50000],
   
@@ -138,9 +141,11 @@ SUGGESTED_RANGES_LEVEL5L6 = {
     'E_diss':              [40000, 70000],
     'K_eq_ref':            [1e-6, 1e-2],
     'H_eq':                [5000, 50000],
-    # Metal surface kinetics (Grant 1988)
-    'k_diss_metal_ref':    [1.346e-8, 1.346e-4],
-    'E_diss_metal':        [70000, 100000],
+    # Metal surface kinetics, centred on the 316L defaults (2.63e-11 mol/m2/s/Pa,
+    # 55.0 kJ/mol at T_ref = 673 K) like the other studies centre on theirs. The
+    # Incoloy 802 ranges inherited here excluded both defaults.
+    'k_diss_metal_ref':    [2.6287e-13, 2.6287e-9],
+    'E_diss_metal':        [40000, 70000],
     'K_eq_metal_ref':      [1e-5, 1e-1],
     'H_eq_metal':          [5000, 40000],
 }
@@ -177,7 +182,7 @@ _SA_SLOW_OXIDE    = {'oxide_thickness': [1e-7, 1e-5],
 
 # thin, fast metal -> the metal is NOT limiting
 _SA_FAST_METAL    = {'metal_thickness': [5e-5, 5e-4],
-                     'D_ref':           [4.3e-8, 4.3e-7]}
+                     'D_ref':           [2.8e-10, 2.8e-9]}   # top decade of D_ref
 
 # suppress the defect bypass so flux must cross the intact oxide
 _SA_DEFECTS_OFF   = {'f_pinhole':   [1e-7, 1e-5],
@@ -196,7 +201,7 @@ _SA_FAST_SURFACE  = {'P_upstream':  [1e4, 1e7],
 # L5L6 only — slow surface (low pressure + slow dissociation on oxide and metal)
 _SA_SLOW_SURFACE  = {'P_upstream':       [1e-7, 1e1],
                      'k_diss_ref':       [9.5e-12, 9.5e-9],
-                     'k_diss_metal_ref': [1.3e-10, 1.3e-7]}
+                     'k_diss_metal_ref': [2.6e-15, 2.6e-12]}  # 1e-4..1e-1 x default
 
 REGIME_PRESETS = {
     'metal':   _sa_ranges_with(SUGGESTED_RANGES_LEVEL5L6, {}),
