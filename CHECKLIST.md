@@ -163,6 +163,19 @@ overrides the geometry.
       SA rankings, which named trap inputs, dropped until the next scan. The argument is
       written up in `STEADY_STATE.md`, which replaces `TRAPPING_VALIDATION.md`.
 
+## Sensitivity-analysis design (PI review, 2026-11-25)
+
+- [x] **Scale parameters were sampled uniformly in linear space over ranges of up to
+      fourteen decades.** `f_pinhole` in [1e-5, 0.1] put 99.9% of draws above 1e-4,
+      `P_upstream` in [1e-7, 1e7] Pa put 99.99999% above 1 Pa, and so on for every
+      pre-exponential, thickness and area fraction. The indices described the top
+      decade of each range only.
+      **Fixed:** `lhs_sample` lays the hypercube out in log10 for every positive scale
+      quantity and maps it back; energies, heats and temperature, which already sit in
+      an exponent, stay linear (`LINEAR_SAMPLED_PARAMS`). New inputs default to log, and
+      a log range reaching zero is refused. The analysis side needs no change: PAWN
+      slices on quantiles and delta on ranks, so both are invariant to the transform.
+
 ## Test coverage
 
 - [x] **Physics test suite.** The model wrappers are pinned only by the 13 values in the

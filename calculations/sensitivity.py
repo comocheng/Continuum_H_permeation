@@ -857,6 +857,86 @@ def _make_problem(param_ranges):
     }
 
 
+# -----------------------------------------------------------------------------
+# Sampling scale: which inputs are drawn log-uniformly
+# -----------------------------------------------------------------------------
+#: Inputs drawn uniformly in LINEAR space. These are the ones that already enter
+#: the model as an exponent -- activation energies and heats of solution inside
+#: exp(-E/RT), and temperature itself -- so equal steps in them are already equal
+#: multiplicative steps in the rate constants they control.
+#:
+#: Every other input is a positive scale quantity (a pre-exponential, a
+#: thickness, a pressure, an area fraction, a ratio, a grain size) whose range
+#: spans one to fourteen decades, and is drawn LOG-uniformly. A uniform draw over
+#: [1e-5, 0.1] puts 99.9% of the samples above 1e-4, so the bottom three decades
+#: of the range the config states would never be explored; a log-uniform draw
+#: gives each decade equal weight, which is what a range written as
+#: "1e-5 to 0.1" means.
+#:
+#: New inputs default to log-uniform, and a range that starts at or below zero is
+#: refused rather than silently linearised -- add the name here if it really
+#: belongs on a linear scale.
+LINEAR_SAMPLED_PARAMS = frozenset({
+    'temperature',
+    'E_D', 'H_s',                 # metal diffusion / solution
+    'E_D_ox', 'H_sol_ox',         # oxide diffusion / solution
+    'E_diss', 'H_eq',             # oxide surface kinetics
+    'E_diss_metal', 'H_eq_metal', # metal surface kinetics
+})
+
+
+def sampling_scales(param_ranges, linear_params=LINEAR_SAMPLED_PARAMS):
+    """``{name: 'log' | 'linear'}`` for every parameter in ``param_ranges``.
+
+    Raises
+    ------
+    ValueError
+        If a parameter that would be sampled log-uniformly has a lower bound
+        at or below zero.
+    """
+    scales = {}
+    for name, (lo, hi) in param_ranges.items():
+        if name in linear_params:
+            scales[name] = 'linear'
+            continue
+        if not (lo > 0 and hi > 0):
+            raise ValueError(
+                f"{name!r} range [{lo:g}, {hi:g}] cannot be sampled log-uniformly; "
+                f"add it to LINEAR_SAMPLED_PARAMS if it belongs on a linear scale")
+        scales[name] = 'log'
+    return scales
+
+
+def lhs_sample(param_ranges, N, seed=42, linear_params=LINEAR_SAMPLED_PARAMS):
+    """Latin hypercube over ``param_ranges``, log-uniform where appropriate.
+
+    The hypercube is laid out in the space each input is sampled in --
+    log10 for scale quantities, linear for energies and temperature (see
+    LINEAR_SAMPLED_PARAMS) -- and mapped back, so every returned value is in
+    physical units and lies within its stated range.
+
+    Returns
+    -------
+    X : ndarray, shape (N, D)
+        Physical parameter values, columns in ``param_ranges`` order.
+    scales : dict
+        ``{name: 'log' | 'linear'}``, as from :func:`sampling_scales`.
+    """
+    scales = sampling_scales(param_ranges, linear_params)
+    names  = list(param_ranges)
+    bounds = [[np.log10(lo), np.log10(hi)] if scales[n] == 'log' else [lo, hi]
+              for n, (lo, hi) in param_ranges.items()]
+    Z = latin_sampler.sample({'num_vars': len(names), 'names': names,
+                              'bounds': bounds}, N, seed=seed)
+    X = Z.copy()
+    for j, n in enumerate(names):
+        if scales[n] == 'log':
+            lo, hi = param_ranges[n]
+            # clip: 10**log10(x) can land one ulp outside [lo, hi]
+            X[:, j] = np.clip(10.0 ** Z[:, j], lo, hi)
+    return X, scales
+
+
 STUDY_STAMP_FILE = 'study.txt'
 
 
@@ -944,7 +1024,15 @@ def run_global_lhs_scan(param_ranges, N, seed=42, wrapper=None,
         df : tidy DataFrame — one row per LHS draw; columns = sampled parameter
              values (the SA inputs X) + SCAN_OUTPUT_FIELDS + SCAN_LABEL_FIELDS.
 
-        problem : SALib problem dict (names/bounds) for reuse downstream.
+        problem : SALib problem dict (names/bounds) for reuse downstream, plus
+             'scales' = {name: 'log' | 'linear'}.
+
+    Notes
+    -----
+    Scale parameters are drawn log-uniformly and energies/temperature uniformly
+    (see LINEAR_SAMPLED_PARAMS and lhs_sample). PAWN and delta both condition
+    on ranks of X, so the given-data indices need no matching transform; the
+    choice of scale matters only for WHERE the samples fall.
     """
     if wrapper is None:
         wrapper = level5L6_model_wrapper
@@ -961,12 +1049,15 @@ def run_global_lhs_scan(param_ranges, N, seed=42, wrapper=None,
 
     problem = _make_problem(param_ranges)
     names   = problem['names']
-    X       = latin_sampler.sample(problem, N, seed=seed)
+    X, scales = lhs_sample(param_ranges, N, seed=seed)
+    problem['scales'] = scales
     n       = X.shape[0]
 
     if verbose:
+        n_log = sum(s == 'log' for s in scales.values())
         print(f"\n{'='*70}")
-        print(f"GLOBAL LHS SCAN — {n} samples × {len(names)} params (seed={seed})")
+        print(f"GLOBAL LHS SCAN — {n} samples × {len(names)} params (seed={seed}; "
+              f"{n_log} log-uniform, {len(names) - n_log} linear)")
         print(f"{'='*70}")
 
     rows = []
