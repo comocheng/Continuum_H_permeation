@@ -204,6 +204,20 @@ overrides the geometry.
       resistance. The 316L default point keeps its labels (L5 metal, L5L6 oxide); the
       docs example is now 46% surface / 54% metal. The gate is unchanged.
 
+- [x] **The Level 2b interface solve failed at the edges the SA samples.** Two bugs,
+      both reported as at most `converged=False` and usually not at all:
+      - brentq's `xtol=1e-12` is absolute, in Pa. Below ~1e-3 Pa upstream the interface
+        pressure is smaller than that, so brentq stopped at the bracket edge and returned
+        `converged=True` with up to ~95% flux imbalance.
+      - When the root lay outside the bracket (within 1e-10 of a limit) the fallback
+        always took `P_min`, the oxide-dominated limit. On a metal-dominated wall (1 nm
+        oxide, 1e7 Pa) that returned 3e3 mol/m2/s for a wall that passes 3e-8.
+
+      **Fixed:** `xtol` scales with the bracket, and the fallback uses the exact root of
+      the quadratic in sqrt(P_int), taking the flux from the well-conditioned metal side.
+      In a 6000-draw log-uniform L5 scan, 15 rows had been wrong by up to 11.8 decades
+      and had changed regime. `tests/test_interface_solver.py`; the gate is unchanged.
+
 ## Test coverage
 
 - [x] **Physics test suite.** The model wrappers are pinned only by the 13 values in the
