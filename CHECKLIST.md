@@ -254,6 +254,14 @@ overrides the geometry.
       selection contributes. Scans carry a `SCAN_VERSION` in their stamp, and the
       notebook cache refuses older ones.
 
+- [x] **The SA ran serially, for hours per notebook.** Every model evaluation and every
+      (regime, metric) PAWN/delta call ran one at a time, and delta dominates, at about
+      30 s per (regime, metric) at 1500 rows.
+      **Done:** both stages run in a spawn-based process pool (`n_jobs`, default every
+      CPU or `$PERMEATION_N_JOBS`). Workers are pinned to the parent's study. Each SALib
+      call seeds itself, so results are identical to serial
+      (`tests/test_sa_parallel.py`, marked slow).
+
 ## Test coverage
 
 - [x] **Physics test suite.** The model wrappers are pinned only by the 13 values in the

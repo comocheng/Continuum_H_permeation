@@ -13,7 +13,7 @@ computed on it, so no further model evaluations are needed downstream.
 | **Inputs** | `param_ranges` (e.g. `SUGGESTED_RANGES_LEVEL5L6`), `N`, `seed=42` |
 | **Outputs** | A tidy DataFrame, one row per draw; and the SALib problem dict for reuse |
 | **Code** | [`run_global_lhs_scan`](../api/sensitivity), `level5_model_wrapper`, `level5L6_model_wrapper` |
-| **Cost** | One model solve per draw; the dominant cost of the workflow |
+| **Cost** | One model solve per draw, well under 1 ms each; scans of `PARALLEL_MIN_DRAWS` or more run in worker processes (`n_jobs`) with results identical to a serial run |
 
 ## Concepts
 

@@ -13,7 +13,7 @@ they do not share.
 | **Inputs** | The regime clusters, `param_names`, `REGIME_SA_METRICS` |
 | **Outputs** | Per-regime index tables; `compare_<index>_<metric>.csv` matrices; plots |
 | **Code** | [`givendata_sensitivity_by_regime`](../api/sensitivity), `summarize_givendata`, `regime_comparison_matrix` |
-| **Cost** | Hours on the largest cluster; roughly linear in the number of metrics |
+| **Cost** | δ dominates: a few minutes per (regime, metric) at 5000 rows, run in parallel across them (`n_jobs`, default every CPU or `$PERMEATION_N_JOBS`) |
 
 ## Concepts
 
@@ -89,7 +89,7 @@ per column compares *rankings*, which is the question actually being asked.
 | Every parameter looks significant | The dummy floor has not been drawn. |
 | An empty or skipped plot | The plotter returned `None`; the regime was skipped or the matrix was empty. Not a crash. |
 | Indices shift between runs at the same `N` | Estimator noise. Compare against the dummy, not against the previous run. |
-| The run takes hours | Expected. Do not add a fourth metric casually. |
+| The run takes hours | It should not: scans and indices run in worker processes. Check `n_jobs` / `$PERMEATION_N_JOBS`. Results do not depend on the worker count. |
 
 ---
 

@@ -1078,12 +1078,93 @@ def _save_scan(df, path):
 
 
 # -----------------------------------------------------------------------------
+# Parallel execution
+# -----------------------------------------------------------------------------
+# Both expensive stages are embarrassingly parallel: each model evaluation is
+# independent, and each (regime, metric) index is one self-contained SALib call
+# that seeds its own random state. Farming them out changes no number -- the
+# results are identical to a serial run (tests/test_sa_parallel.py) -- only the
+# wall time. Workers are started with 'spawn' on every platform, so a notebook
+# kernel never forks with matplotlib or threads live.
+
+#: Below this many draws a scan runs serially: starting workers costs ~1-2 s each.
+PARALLEL_MIN_DRAWS = 2000
+
+
+def default_n_jobs():
+    """Worker count: $PERMEATION_N_JOBS if set, else every CPU."""
+    env = os.environ.get('PERMEATION_N_JOBS', '').strip()
+    return max(1, int(env)) if env else (os.cpu_count() or 1)
+
+
+class _worker_pool:
+    """ProcessPoolExecutor whose workers load the SAME study as this process.
+
+    A spawned worker imports calculations afresh, and model_config resolves its
+    study at import -- from $PERMEATION_STUDY, else the working directory. Both
+    usually agree with the parent, but a notebook that set neither and changed
+    directory would load a different study, or none. So the parent's resolved
+    study is pinned in the environment the workers inherit, for the pool's
+    lifetime only. Workers also run quiet: no study banner, no warnings (a
+    failed evaluation is still reported, through the scan's 'error' column).
+    """
+
+    def __init__(self, n_jobs):
+        self.n_jobs = n_jobs
+
+    def __enter__(self):
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor
+        from calculations.config.model_config import ACTIVE_STUDY_PATH
+        self._saved = {k: os.environ.get(k) for k in
+                       ('PERMEATION_STUDY', 'PERMEATION_STUDY_QUIET', 'PYTHONWARNINGS')}
+        os.environ['PERMEATION_STUDY'] = str(ACTIVE_STUDY_PATH)
+        os.environ['PERMEATION_STUDY_QUIET'] = '1'
+        os.environ['PYTHONWARNINGS'] = 'ignore'
+        self._pool = ProcessPoolExecutor(self.n_jobs,
+                                         mp_context=mp.get_context('spawn'))
+        return self._pool
+
+    def __exit__(self, *exc):
+        try:
+            self._pool.shutdown(wait=True, cancel_futures=True)
+        finally:
+            for k, v in self._saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        return False
+
+
+def _evaluate_rows(wrapper, names, X, fixed_params, output_fields, label_fields):
+    """Evaluate the wrapper on rows of X; the unit of work for run_global_lhs_scan."""
+    rows = []
+    for x in X:
+        params = dict(zip(names, x))
+        rec    = wrapper({**params, **fixed_params}, return_full_record=True)
+        row    = dict(params)  # ONLY the sampled values are SA inputs
+        # fixed values are recorded for provenance but must stay out of the SA
+        # parameter list — a constant column has zero variance, which PAWN and
+        # delta cannot condition on.
+        row.update(fixed_params)
+        for f in output_fields:
+            row[f] = rec.get(f, np.nan)
+        for f in label_fields:
+            row[f] = rec.get(f, 'undefined')
+        row['error'] = rec.get('error', '')
+        rows.append(row)
+    return rows
+
+
+# -----------------------------------------------------------------------------
 # Phase 1 — Step 3: Global LHS foundation (one evaluation pass, full records)
 # -----------------------------------------------------------------------------
 
 def run_global_lhs_scan(param_ranges, N, seed=42, wrapper=None,
                         output_fields=None, label_fields=None,
-                        fixed_params=None, save_path=None, verbose=True):
+                        fixed_params=None, save_path=None, verbose=True,
+                        n_jobs=None):
     """
     Space-filling LHS over all parameters, evaluated once with the full record.
 
@@ -1105,6 +1186,10 @@ def run_global_lhs_scan(param_ranges, N, seed=42, wrapper=None,
         return_full_record=True.
     save_path : str or None
         If given, persist the tidy DataFrame (CSV, or parquet by extension).
+    n_jobs : int or None
+        Worker processes for the model evaluations; None means default_n_jobs().
+        Scans smaller than PARALLEL_MIN_DRAWS run serially. The result does not
+        depend on n_jobs.
 
     Returns
     -------
@@ -1148,23 +1233,27 @@ def run_global_lhs_scan(param_ranges, N, seed=42, wrapper=None,
               f"{n_log} log-uniform, {len(names) - n_log} linear)")
         print(f"{'='*70}")
 
-    rows = []
-    for i in range(n):
-        params = dict(zip(names, X[i]))
-        rec    = wrapper({**params, **fixed_params}, return_full_record=True)
-        row    = dict(params)  # ONLY the sampled values are SA inputs
-        # fixed values are recorded for provenance but must stay out of the SA
-        # parameter list — a constant column has zero variance, which PAWN and
-        # delta cannot condition on.
-        row.update(fixed_params)
-        for f in output_fields:
-            row[f] = rec.get(f, np.nan)
-        for f in label_fields:
-            row[f] = rec.get(f, 'undefined')
-        row['error'] = rec.get('error', '')
-        rows.append(row)
-        if verbose and ((i + 1) % max(1, n // 10) == 0 or (i + 1) == n):
-            print(f"  scan {i + 1}/{n} ({(i + 1) / n * 100:.0f}%)")
+    n_jobs = default_n_jobs() if n_jobs is None else max(1, int(n_jobs))
+    args = (wrapper, names)
+    tail = (fixed_params, output_fields, label_fields)
+    if n_jobs == 1 or n < PARALLEL_MIN_DRAWS:
+        rows = []
+        step = max(1, n // 10)
+        for i0 in range(0, n, step):
+            rows += _evaluate_rows(*args, X[i0:i0 + step], *tail)
+            if verbose:
+                i = min(i0 + step, n)
+                print(f"  scan {i}/{n} ({i / n * 100:.0f}%)")
+    else:
+        # ~8 chunks per worker: enough to balance uneven solve times, few enough
+        # that pickling the wrapper and the results is negligible.
+        chunks = np.array_split(X, min(n, 8 * n_jobs))
+        with _worker_pool(n_jobs) as pool:
+            parts = list(pool.map(_evaluate_rows,
+                                  *zip(*[(*args, c, *tail) for c in chunks])))
+        rows = [r for part in parts for r in part]
+        if verbose:
+            print(f"  scan {n}/{n} (100%) on {n_jobs} workers")
 
     df = pd.DataFrame(rows)
 
@@ -1462,7 +1551,7 @@ def givendata_sensitivity_by_regime(clusters, param_names, output_metrics=REGIME
                                     methods=('pawn', 'delta'), pawn_S=10,
                                     delta_resamples=100, seed=42,
                                     log_metrics=LOG_METRICS_DEFAULT, n_dummy=20,
-                                    verbose=True):
+                                    verbose=True, n_jobs=None):
     """
     Route B (primary): for each (regime, metric), run PAWN and Borgonovo-delta on the
     TRUE in-regime cluster — valid on arbitrary scattered points, zero new model evals.
@@ -1499,7 +1588,7 @@ def givendata_sensitivity_by_regime(clusters, param_names, output_metrics=REGIME
     """
     param_names = list(param_names)
     dummy_names = [f'_dummy_{i}' for i in range(n_dummy)]
-    results = {}
+    results, jobs = {}, []
     for reg, cdf in clusters.items():
         X = cdf[param_names].to_numpy(dtype=float)
         if n_dummy:
@@ -1514,45 +1603,65 @@ def givendata_sensitivity_by_regime(clusters, param_names, output_metrics=REGIME
             Xv = X[mask]
             Yv = np.log10(Y[mask]) if use_log else Y[mask]
             entry = {'n': int(mask.sum()), 'log': use_log}
+            results[reg][m] = entry
             if entry['n'] < 10 or np.ptp(Yv) == 0:
                 entry['skipped'] = 'insufficient or degenerate output'
-                results[reg][m] = entry
                 if verbose:
                     print(f"  [{reg}/{m}] skipped ({entry['n']} pts)")
                 continue
-            if 'pawn' in methods:
-                entry['pawn'] = pawn_analyzer.analyze(problem, Xv, Yv, S=pawn_S, seed=seed)
-            if 'delta' in methods:
-                entry['delta'] = delta_analyzer.analyze(problem, Xv, Yv,
-                                                        num_resamples=delta_resamples,
-                                                        conf_level=0.95, seed=seed,
-                                                        print_to_console=False)
-            # Noise floor = the best score any dummy achieved. Indices for the real
-            # parameters are trimmed back to param_names so every downstream
-            # consumer still sees exactly the parameters it asked for.
-            if n_dummy and 'delta' in entry:
-                d_all = np.asarray(entry['delta']['delta'])
-                entry['floor'] = float(np.max(d_all[len(param_names):]))
-            if n_dummy and 'pawn' in entry:
-                p_all = np.asarray(entry['pawn']['median'])
-                entry['floor_pawn'] = float(np.max(p_all[len(param_names):]))
-            for meth, keys in (('pawn', ('median', 'mean', 'minimum', 'maximum', 'CV')),
-                               ('delta', ('delta', 'delta_conf', 'S1', 'S1_conf'))):
-                if n_dummy and meth in entry:
-                    for k in keys:
-                        if k in entry[meth]:
-                            entry[meth][k] = np.asarray(entry[meth][k])[:len(param_names)]
-                    entry[meth]['names'] = list(param_names)
+            jobs.append((reg, m, (problem, Xv, Yv, tuple(methods), pawn_S,
+                                  delta_resamples, seed)))
 
-            results[reg][m] = entry
-            if verbose:
-                top, floor = '', entry.get('floor', np.nan)
-                if 'delta' in entry:
-                    d = np.asarray(entry['delta']['delta'])
-                    top = f"{param_names[int(np.argmax(d))]} ({np.max(d):.3f})"
-                print(f"  [{reg}/{m}] n={entry['n']:5d}  floor δ={floor:.3f} "
-                      f"PAWN={entry.get('floor_pawn', np.nan):.3f}  top-δ: {top}")
+    # One SALib call per (regime, metric). Each seeds its own random state, so
+    # running them in worker processes gives exactly the serial numbers.
+    n_jobs = default_n_jobs() if n_jobs is None else max(1, int(n_jobs))
+    n_jobs = min(n_jobs, len(jobs))
+    if n_jobs <= 1:
+        outs = [_analyze_entry(*a) for _, _, a in jobs]
+    else:
+        with _worker_pool(n_jobs) as pool:
+            outs = list(pool.map(_analyze_entry, *zip(*[a for _, _, a in jobs])))
+
+    for (reg, m, _), out in zip(jobs, outs):
+        entry = results[reg][m]
+        entry.update(out)
+        # Noise floor = the best score any dummy achieved. Indices for the real
+        # parameters are trimmed back to param_names so every downstream
+        # consumer still sees exactly the parameters it asked for.
+        if n_dummy and 'delta' in entry:
+            d_all = np.asarray(entry['delta']['delta'])
+            entry['floor'] = float(np.max(d_all[len(param_names):]))
+        if n_dummy and 'pawn' in entry:
+            p_all = np.asarray(entry['pawn']['median'])
+            entry['floor_pawn'] = float(np.max(p_all[len(param_names):]))
+        for meth, keys in (('pawn', ('median', 'mean', 'minimum', 'maximum', 'CV')),
+                           ('delta', ('delta', 'delta_conf', 'S1', 'S1_conf'))):
+            if n_dummy and meth in entry:
+                for k in keys:
+                    if k in entry[meth]:
+                        entry[meth][k] = np.asarray(entry[meth][k])[:len(param_names)]
+                entry[meth]['names'] = list(param_names)
+        if verbose:
+            top, floor = '', entry.get('floor', np.nan)
+            if 'delta' in entry:
+                d = np.asarray(entry['delta']['delta'])
+                top = f"{param_names[int(np.argmax(d))]} ({np.max(d):.3f})"
+            print(f"  [{reg}/{m}] n={entry['n']:5d}  floor δ={floor:.3f} "
+                  f"PAWN={entry.get('floor_pawn', np.nan):.3f}  top-δ: {top}")
     return results
+
+
+def _analyze_entry(problem, X, Y, methods, pawn_S, delta_resamples, seed):
+    """PAWN and/or delta for one (regime, metric); the unit of parallel work."""
+    out = {}
+    if 'pawn' in methods:
+        out['pawn'] = pawn_analyzer.analyze(problem, X, Y, S=pawn_S, seed=seed)
+    if 'delta' in methods:
+        out['delta'] = delta_analyzer.analyze(problem, X, Y,
+                                              num_resamples=delta_resamples,
+                                              conf_level=0.95, seed=seed,
+                                              print_to_console=False)
+    return out
 
 
 def summarize_givendata(results, param_names):
