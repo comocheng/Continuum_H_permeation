@@ -183,6 +183,27 @@ overrides the geometry.
       a log range reaching zero is refused. The analysis side needs no change: PAWN
       slices on quantiles and delta on ranks, so both are invariant to the transform.
 
+- [x] **The regime fractions compared resistances in different units.** The SA strata
+      are `argmax` of the resistance fractions, so the fractions decide which cluster a
+      sample lands in. Two of them were wrong:
+      - **L5L6 surface.** `R_surface = 1/(k_diss P (1-theta)^2)` is in m2 s/mol; `1/alpha`
+        and `1/beta` are in m2 s Pa^0.5/mol. Near equilibrium the surface was
+        under-weighted by sqrt(P)/2 (158x at 1 bar) and over-weighted ~6000x at 1e-7 Pa.
+        The docs' own example, a surface that cuts the 316L flux 9.2x, read as 2.78%
+        surface.
+      - **L5 oxide/metal.** The split was the linear pressure drop across the oxide,
+        while the metal runs on sqrt(P), which leaned labels towards `oxide` (review
+        item 6): at P_int = 0.4 P_up it said 60% oxide where speeding up the metal
+        raises the flux more.
+
+      **Fixed:** every fraction is now a degree of rate control,
+      X_i = d ln J / d ln k_i, computed from differential resistances in one unit
+      (`surface_resistance`, `series_rate_control_L5`). The fractions sum to 1 and
+      `tests/test_rate_control.py` checks each one against a finite-difference X_i. The
+      L5 split now matches Figure 7, which already used the differential metal
+      resistance. The 316L default point keeps its labels (L5 metal, L5L6 oxide); the
+      docs example is now 46% surface / 54% metal. The gate is unchanged.
+
 ## Test coverage
 
 - [x] **Physics test suite.** The model wrappers are pinned only by the 13 values in the

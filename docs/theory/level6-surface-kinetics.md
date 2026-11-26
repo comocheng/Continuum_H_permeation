@@ -84,16 +84,16 @@ Take the bare metal with surface kinetics, `L1+L6`, at 873 K and 1 bar:
 theta                 0.573614764
 P_int = P_virtual     1190.673636   Pa
 J_ss                  4.722188e-07  mol/m²/s
-R_surface             2.0924e+06
+R_surface             6.2384e+07
 R_metal               7.3072e+07
-fraction_surface      2.78%
-fraction_metal        97.22%
+fraction_surface      46.05%
+fraction_metal        53.95%
 rate_limiting         metal
 ```
 
 Level 1 without surface kinetics gave `4.327598e-06` — so switching the surface
 on **cut the flux by a factor of 9.16**. Yet the resistance decomposition
-attributes only 2.78% of the resistance to the surface, and `rate_limiting`
+gives the surface slightly less than half the resistance, and `rate_limiting`
 reports `metal`.
 
 Both are correct, and reconciling them is the key to reading Level 6 output.
@@ -142,9 +142,9 @@ the most complete configuration available:
 ```text
 flux               9.860237e-07  mol/m²/s
 theta              0.622488
-frac_surface       2.273203e-04
-frac_oxide         7.500306e-01
-frac_metal         2.497421e-01
+frac_surface       1.856848e-02
+frac_oxide         7.391910e-01
+frac_metal         2.422405e-01
 sum                1.000000000
 regime             oxide
 PRF                nan
@@ -161,8 +161,8 @@ separate kinetic pairs as well — the oxide surface and the bare metal exposed 
 pinholes have their own constants, as {doc}`equilibrium-models` describes.
 
 ```{important}
-**`frac_oxide` jumps by a factor of 71 between Level 5 and Level 5L6** — from
-`1.054009e-02` to `7.500306e-01` — even though the oxide's thickness and material
+**`frac_oxide` jumps by a factor of 140 between Level 5 and Level 5L6** — from
+`5.298543e-03` to `7.391910e-01` — even though the oxide's thickness and material
 properties are unchanged. That is enough to flip the wall from metal-limited to
 oxide-limited.
 

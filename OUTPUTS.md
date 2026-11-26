@@ -28,8 +28,8 @@ These are the two top-level entry points the sensitivity analysis calls. **Verif
 | `flux_defect` | 8.653e-08 | mol m⁻² s⁻¹ | flux through defect paths |
 | `flux_bare_metal` | 4.328e-06 | mol m⁻² s⁻¹ | reference flux, no oxide |
 | `defect_enhancement` | 1.000103 | – | defect path enhancement |
-| `frac_oxide` | 1.054e-02 | – | fraction of total resistance in oxide |
-| `frac_metal` | 0.9694 | – | fraction in metal |
+| `frac_oxide` | 5.299e-03 | – | oxide's degree of rate control (share of total) |
+| `frac_metal` | 0.9746 | – | fraction in metal |
 | `frac_defect` | 0.0201 | – | fraction in defect paths |
 | `regime` | `'metal'` | – | **argmax regime label** |
 | `D_metal` | 2.364e-10 | m²/s | lattice diffusivity at T |
@@ -48,7 +48,7 @@ Same as above except: **no** `flux_bare_metal`, `frac_defect`, `defect_enhanceme
 
 | Key | Example | Units | Meaning |
 |---|---|---|---|
-| `frac_surface` | 2.273e-04 | – | fraction of resistance in surface step |
+| `frac_surface` | 1.857e-02 | – | surface step's degree of rate control |
 | `theta` | 0.6225 | – | **Langmuir surface coverage** |
 | `Phi_transport` | 3.099e-12 | mol m⁻¹ s⁻¹ Pa⁻⁰·⁵ | tier-3 transport permeability |
 | `eta_surf` | 0.9856 | – | surface efficiency, $\Phi_{app}/\Phi_{transport}$ |
@@ -119,7 +119,7 @@ There is no trapping output: trapping does not change steady-state flux and was 
 |---|---|
 | `get_all_properties()` | **8 keys:** `k_diss`, `k_recomb`, `K_eq`, `D_ox`, `K_ox`, `L_ox`, `D_m`, `K_s_m` |
 | `compute_permeances()` | tuple: `alpha`, `beta` |
-| `g_theta()`, `sqrt_P_int_from_theta()`, `smooth_surface_resistance()` | scalars |
+| `g_theta()`, `sqrt_P_int_from_theta()`, `surface_resistance()` | scalars |
 | `surface_flux()`, `oxide_flux()`, `metal_flux()` | scalar fluxes |
 | `solve_steady_state_flux_L1L6()` | **6 keys:** `theta`, `P_int`, `J_ss`, `beta`, `rate_limiting`, `resistances` |
 | `solve_steady_state_flux_L2aL6()` | **6 keys:** `theta`, `P_surf`, `J_ss`, `alpha`, `rate_limiting`, `resistances` |

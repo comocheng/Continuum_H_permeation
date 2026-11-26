@@ -25,6 +25,15 @@ from the resistance fractions, not from the flux:
 | L5L6 (surface kinetics) | `surface`, `oxide`, `metal` |
 | L5 (no surface kinetics) | `oxide`, `metal`, `defect` |
 
+Every fraction is a **degree of rate control**, $X_i = \partial\ln J/\partial\ln k_i$:
+the step with the largest one is the step whose speed-up would raise the flux most.
+They are unit-free and sum to 1 on each path, which is what makes an `argmax` across
+steps with different rate laws (Henry oxide, Sieverts metal, Langmuir surface)
+meaningful. For L5L6 the surface term uses
+`surface_resistance` in `calculations.surface_kinetics`; for L5 the oxide/metal split
+uses `series_rate_control_L5`. Paths in parallel combine by flux weight, which is
+exactly how degrees of rate control add.
+
 The default rule is `argmax` — the largest fraction wins — with a `threshold` variant
 that requires a fraction to exceed 0.5 before it is named, and reports `mixed`
 otherwise.

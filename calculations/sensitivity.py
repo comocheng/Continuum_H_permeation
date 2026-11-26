@@ -298,6 +298,61 @@ def check_against_config(raise_on_fail=True, verbose=True):
 # MODEL WRAPPER — LEVEL 5
 # =============================================================================
 
+def series_rate_control_L5(P_up, P_int, P_down=0.0):
+    r"""Oxide's degree of rate control on the Level 5 intact (oxide + metal) path.
+
+    The Level 5 oxide is Henry's-law, linear in pressure, and the metal is
+    Sieverts, linear in :math:`\sqrt{P}`:
+
+    .. math::
+
+        J = a\,(P_{up} - P_{int}) = b\,(\sqrt{P_{int}} - \sqrt{P_{down}}),
+        \qquad a = D_{ox}K_{ox}/L_{ox},\; b = D_m K_s/L_m
+
+    The fraction of the *pressure* dropped across the oxide,
+    :math:`(P_{up}-P_{int})/P_{up}`, used to stand in for the oxide's share of the
+    resistance. It compares a linear drop with a square-root one and so leans
+    towards the oxide: at :math:`P_{int} = 0.4\,P_{up}` it calls the wall 60%
+    oxide-limited, although raising the metal's permeance would raise the flux
+    more than raising the oxide's.
+
+    The quantity that answers "which layer limits the flux" is the degree of rate
+    control (Campbell), :math:`X_i = \partial\ln J/\partial\ln k_i`. Scaling both
+    permeances by λ scales J by λ at fixed :math:`P_{int}`, so
+    :math:`X_{ox} + X_m = 1` exactly, and
+
+    .. math::
+
+        X_{ox} = \frac{r_{ox}}{r_{ox} + r_m},\qquad
+        r_{ox} = \frac{1}{a},\quad r_m = \frac{2\sqrt{P_{int}}}{b}
+
+    where :math:`r_m` is the metal's differential resistance in pressure,
+    :math:`dP_{int}/dJ` — the :math:`2L\sqrt{P}/(DK_s)` form, evaluated at the
+    solved interface pressure, where it is exact rather than a small-ΔP
+    approximation. Eliminating a and b with the flux balance:
+
+    .. math::
+
+        X_{ox} = \frac{P_{up} - P_{int}}
+                      {(P_{up} - P_{int}) + 2\sqrt{P_{int}}(\sqrt{P_{int}}-\sqrt{P_{down}})}
+
+    which needs only the solved pressures. With :math:`P_{down} = 0` this is
+    :math:`(P_{up}-P_{int})/(P_{up}+P_{int})`, so the layers hand over at
+    :math:`P_{int} = P_{up}/3`, not at :math:`P_{up}/2`.
+
+    Returns NaN if the pressures are not finite; 0.5 if both drops are zero.
+    """
+    if not (np.isfinite(P_up) and np.isfinite(P_int) and np.isfinite(P_down)):
+        return np.nan
+    # clip guards a solver overshoot outside [P_down, P_up]
+    p     = float(np.clip(P_int, max(P_down, 0.0), max(P_up, 0.0)))
+    s     = np.sqrt(p)
+    r_ox  = P_up - p
+    r_m   = 2.0 * s * (s - np.sqrt(max(P_down, 0.0)))
+    tot   = r_ox + r_m
+    return float(r_ox / tot) if tot > 0 else 0.5
+
+
 def level5_model_wrapper(params_dict, return_full_record=False):
     """
     Wrapper for LEVEL 5 complete hierarchical model (L3 + L4).
@@ -443,10 +498,8 @@ def level5_model_wrapper(params_dict, return_full_record=False):
 
         # --- Regime fractions -------------------------------------------------
         # Parallel axis: what share of the flux bypasses the intact oxide.
-        # Series axis: how the driving pressure splits across oxide and metal.
-        # Taken straight from the solved interface pressure, so it is exact — no
-        # linearisation of the sqrt-P metal law (calculate_metal_resistance's
-        # Taylor form is only valid for small dP, and these sweeps run P_down=0).
+        # Series axis: the degree of rate control of each layer on the intact
+        # path, d ln J / d ln (layer permeance); see series_rate_control_L5.
         # The series split is then scaled by the share of flux that actually
         # travels the series path, so all three fractions sum to 1 and the
         # parallel axis competes directly against the two series terms.
@@ -456,12 +509,11 @@ def level5_model_wrapper(params_dict, return_full_record=False):
         frac_defect = f_def / f_tot if f_tot > 0 else np.nan
 
         P_int = result_l5.get('P_interface_intact', np.nan)
-        if P_upstream > 0 and np.isfinite(P_int) and np.isfinite(frac_defect):
-            # clip guards the rare solver overshoot P_int > P_up
-            drop_ox    = float(np.clip((P_upstream - P_int) / P_upstream, 0.0, 1.0))
+        if np.isfinite(P_int) and np.isfinite(frac_defect):
+            x_ox       = series_rate_control_L5(P_upstream, P_int, P_downstream)
             series     = 1.0 - frac_defect
-            frac_oxide = drop_ox * series
-            frac_metal = (1.0 - drop_ox) * series
+            frac_oxide = x_ox * series
+            frac_metal = (1.0 - x_ox) * series
         else:
             frac_oxide = frac_metal = np.nan
 

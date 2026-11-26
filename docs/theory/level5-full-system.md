@@ -107,15 +107,15 @@ a metal correction of real size, the same mechanism is much stronger.
 Level 5 reports three fractions which sum to exactly 1:
 
 ```text
-frac_oxide    1.054009e-02
-frac_metal    0.969359
+frac_oxide    5.298543e-03
+frac_metal    0.974600
 frac_defect   0.020101
 sum           1.000000000
 ```
 
 ```{important}
 These are not three of a kind. `frac_oxide` and `frac_metal` describe a **series**
-split — how the driving pressure divides between the two layers — while
+split — which of the two layers controls the flux on the intact path — while
 `frac_defect` describes a **parallel** split: the share of flux that bypasses the
 intact oxide entirely.
 
@@ -124,13 +124,21 @@ the share of flux that actually travels the series path. That is what allows all
 three to sum to 1 and lets the parallel axis compete directly against the two
 series terms when `assign_regime_L5` picks a winner.
 
-Worth knowing: these fractions are taken straight from the solved interface
-pressure, and so are **exact**. They deliberately avoid
-`calculate_metal_resistance`, whose linearised $2L\sqrt{P}/(DK_s)$ form is only
-valid for small $\Delta P$ — and these sweeps run with $P_{\text{down}} = 0$,
-which is the worst case for that approximation. Level 2b's `resistance_ratio`
-*does* use the linearised form, so the two diagnostics are computed differently
-on purpose and should not be expected to agree numerically.
+The series split is each layer's **degree of rate control**,
+$X_i = \partial\ln J/\partial\ln k_i$ for that layer's permeance
+(`series_rate_control_L5`). The oxide is linear in $P$ and the metal in
+$\sqrt{P}$, so the share of the *pressure* each drops is not their share of
+the control: with $P_{\text{down}} = 0$,
+
+$$X_{ox} = \frac{P_{up} - P_{int}}{P_{up} + P_{int}},$$
+
+and the layers hand over at $P_{int} = P_{up}/3$, not $P_{up}/2$. The metal's
+differential resistance here is the $2L\sqrt{P}/(DK_s)$ form of
+`calculate_metal_resistance`, evaluated at the solved interface pressure, where
+it is exact. (Before 2026-11-26 the split was the linear pressure drop, which
+leaned the labels towards `oxide`.) Level 2b's `resistance_ratio` evaluates that
+form at the upstream pressure instead, so the two diagnostics should not be
+expected to agree numerically.
 ```
 
 For the active study `frac_metal = 0.97`, which is the whole story of this
@@ -202,7 +210,7 @@ backed out of the flux above, so it agrees with `flux` and `regime` instead of
 contradicting them. Note where it lands: $1.362644\times10^{-11}$ against a bare
 metal $\Phi_m = 1.368507\times10^{-11}$, a ratio of $0.996$ — close to
 `modification_factor` $= 1.000011$, but not equal to it. The gap is the coating: at
-1 µm the oxide carries `frac_oxide` $= 1.05\times10^{-2}$ of the resistance, so the
+1 µm the oxide carries `frac_oxide` $= 5.3\times10^{-3}$ of the rate control, so the
 wall does not quite reduce to $D_{\text{eff}}K_s$. The number still reads
 metal-controlled, just as `regime` does. It is not a material constant; see
 {doc}`permeability`.
