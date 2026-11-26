@@ -1007,6 +1007,25 @@ def lhs_sample(param_ranges, N, seed=42, linear_params=LINEAR_SAMPLED_PARAMS):
 
 STUDY_STAMP_FILE = 'study.txt'
 
+#: Bumped whenever a change makes saved scans incomparable with new ones, and
+#: written into the stamp file beside them, so a notebook cache can refuse a scan
+#: drawn under an older design instead of silently reusing it.
+#:   2 -- log-uniform sampling, rate-control regime fractions, fixed interface
+#:        solve (2026-11-26). Unversioned scans are treated as version 1.
+SCAN_VERSION = 2
+
+
+def scan_version(directory):
+    """SCAN_VERSION recorded beside the scans in ``directory`` (1 if none)."""
+    stamp = os.path.join(directory or '.', STUDY_STAMP_FILE)
+    if not os.path.isfile(stamp):
+        return None
+    with open(stamp) as fh:
+        for line in fh:
+            if line.startswith('scan_version:'):
+                return int(line.split(':', 1)[1])
+    return 1
+
 
 def _stamp_study(directory):
     """Record which study produced the files in ``directory``, and shout if it changed.
@@ -1038,7 +1057,8 @@ def _stamp_study(directory):
     with open(stamp, 'w') as fh:
         fh.write(f"study:  {ACTIVE_STUDY_NAME}\n"
                  f"path:   {ACTIVE_STUDY_PATH}\n"
-                 f"source: {ACTIVE_STUDY_SOURCE}\n")
+                 f"source: {ACTIVE_STUDY_SOURCE}\n"
+                 f"scan_version: {SCAN_VERSION}\n")
 
 
 def _save_scan(df, path):
@@ -1268,7 +1288,13 @@ def plot_regime_exploration(partition, output_metrics=('flux', 'permeability', '
 
 
 
-TARGET_CLUSTER_SIZE = 1500   # rows wanted in each regime cluster; see below
+# Rows wanted in each regime cluster. The dummy-parameter floor of PAWN falls
+# roughly as 1/sqrt(n) -- 0.13 at n=500, 0.075 at 1500, 0.036 at 6000 on a
+# synthetic test -- while delta's barely moves (0.13, 0.08, 0.07: its KDE bias
+# does not shrink). At 1500 both floors sat near 0.08 and many rankings were
+# inside them. 5000 halves the PAWN floor; the model evaluations it costs are
+# cheap (well under 1 ms per draw), and the indices parallelise.
+TARGET_CLUSTER_SIZE = 5000
 
 
 def size_draws_for_target(presets, regimes, target_cluster=TARGET_CLUSTER_SIZE,
@@ -1435,7 +1461,7 @@ def _givendata_problem(X, names):
 def givendata_sensitivity_by_regime(clusters, param_names, output_metrics=REGIME_SA_METRICS,
                                     methods=('pawn', 'delta'), pawn_S=10,
                                     delta_resamples=100, seed=42,
-                                    log_metrics=LOG_METRICS_DEFAULT, n_dummy=3,
+                                    log_metrics=LOG_METRICS_DEFAULT, n_dummy=20,
                                     verbose=True):
     """
     Route B (primary): for each (regime, metric), run PAWN and Borgonovo-delta on the
@@ -1443,11 +1469,26 @@ def givendata_sensitivity_by_regime(clusters, param_names, output_metrics=REGIME
 
     n_dummy : int
         Number of DUMMY inputs (uniform random columns the model never saw) appended
-        to X purely to measure the estimator's noise floor. delta is biased positive
-        for an irrelevant input, and that bias does NOT shrink with n — measured flat
-        at ~0.09 from n=400 to n=1500 — so without this an entire table of noise reads
-        as a ranking. Each entry gains 'floor' = max dummy delta; treat any parameter
-        not clearly above it as unresolved. Set 0 to disable.
+        to X purely to measure each estimator's noise floor. delta is biased positive
+        for an irrelevant input, and that bias barely shrinks with n (~0.08 at
+        n=1500, ~0.07 at n=6000), so without this an entire table of noise reads as
+        a ranking. PAWN's floor does shrink, roughly as 1/sqrt(n). Each entry gains
+        'floor' (max dummy delta) and 'floor_pawn' (max dummy PAWN median); treat a
+        parameter not clearly above both as unresolved. The floor is a maximum over
+        the dummies, so it rises with n_dummy: compare floors only between runs
+        that used the same n_dummy. Default 20. Set 0 to disable.
+
+    Notes
+    -----
+    These indices are REGIONAL. Each cluster is the set of draws, from one
+    regime's preset ranges, that the model put in that regime, so an index
+    answers "within this regime, under this preset, how much does the output
+    depend on this input?" It is conditional on the preset ranges (a pinned or
+    narrowed input has little room to matter) and on a selection made on the
+    model's output, which also makes the inputs within a cluster statistically
+    dependent, whereas the LHS drew them independently. Pass the full preset
+    scans (``scans`` from run_targeted_regime_scans) to the same function to get
+    the preset-wide indices without that selection, for comparison.
 
     Returns
     -------
@@ -1492,7 +1533,10 @@ def givendata_sensitivity_by_regime(clusters, param_names, output_metrics=REGIME
             if n_dummy and 'delta' in entry:
                 d_all = np.asarray(entry['delta']['delta'])
                 entry['floor'] = float(np.max(d_all[len(param_names):]))
-            for meth, keys in (('pawn', ('median', 'mean', 'minimum', 'CV')),
+            if n_dummy and 'pawn' in entry:
+                p_all = np.asarray(entry['pawn']['median'])
+                entry['floor_pawn'] = float(np.max(p_all[len(param_names):]))
+            for meth, keys in (('pawn', ('median', 'mean', 'minimum', 'maximum', 'CV')),
                                ('delta', ('delta', 'delta_conf', 'S1', 'S1_conf'))):
                 if n_dummy and meth in entry:
                     for k in keys:
@@ -1506,7 +1550,8 @@ def givendata_sensitivity_by_regime(clusters, param_names, output_metrics=REGIME
                 if 'delta' in entry:
                     d = np.asarray(entry['delta']['delta'])
                     top = f"{param_names[int(np.argmax(d))]} ({np.max(d):.3f})"
-                print(f"  [{reg}/{m}] n={entry['n']:5d}  floor={floor:.3f}  top-δ: {top}")
+                print(f"  [{reg}/{m}] n={entry['n']:5d}  floor δ={floor:.3f} "
+                      f"PAWN={entry.get('floor_pawn', np.nan):.3f}  top-δ: {top}")
     return results
 
 
@@ -1525,6 +1570,7 @@ def summarize_givendata(results, param_names):
             s1 = (np.asarray(entry['delta']['S1']) if 'delta' in entry
                   else np.full(len(param_names), np.nan))
             floor = entry.get('floor', np.nan)
+            floor_p = entry.get('floor_pawn', np.nan)
             for j, p in enumerate(param_names):
                 rows.append({'regime': reg, 'metric': m, 'parameter': p,
                              'pawn_median': pawn_med[j], 'delta': delta[j],
@@ -1534,7 +1580,11 @@ def summarize_givendata(results, param_names):
                              'floor': floor,
                              'delta_over_floor': (delta[j] / floor
                                                   if floor and np.isfinite(floor)
-                                                  else np.nan)})
+                                                  else np.nan),
+                             'floor_pawn': floor_p,
+                             'pawn_over_floor': (pawn_med[j] / floor_p
+                                                 if floor_p and np.isfinite(floor_p)
+                                                 else np.nan)})
     return pd.DataFrame(rows)
 
 

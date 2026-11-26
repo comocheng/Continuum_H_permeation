@@ -238,6 +238,22 @@ overrides the geometry.
       shipped studies this changes almost nothing; that is a separate microstructure
       question (the 316L and Incoloy values are copied from Hastelloy N).
 
+- [x] **The SA design overstated what its indices resolve (review item 11).**
+      - The delta noise floor was ~0.09 at 1500-row clusters, so many rankings sat inside
+        it. delta's floor barely shrinks with n (KDE bias); PAWN's falls as ~1/sqrt(n)
+        but had no floor computed at all.
+      - The L5 notebook used 3 dummies and L5L6 used 20. The floor is a max over dummies,
+        so the two floors were not comparable.
+      - The clusters are selected on the output, so every index is regional (conditional
+        on preset and regime, with inputs made dependent by the selection). Nothing said so.
+
+      **Done:** a PAWN floor (`floor_pawn`, `pawn_over_floor`) alongside delta's; 20
+      dummies everywhere; `TARGET_CLUSTER_SIZE` 1500 -> 5000, which halves the PAWN
+      floor. The notebooks and docs state the regional reading, and a new Phase 4 repeats
+      the indices on each preset's full scan (`routeB_presetwide.csv`) to show what the
+      selection contributes. Scans carry a `SCAN_VERSION` in their stamp, and the
+      notebook cache refuses older ones.
+
 ## Test coverage
 
 - [x] **Physics test suite.** The model wrappers are pinned only by the 13 values in the

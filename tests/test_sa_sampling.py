@@ -62,3 +62,31 @@ def test_scan_records_physical_values_and_scales():
         verbose=False)
     assert problem['scales'] == {'f_pinhole': 'log', 'H_s': 'linear'}
     assert np.median(df['f_pinhole']) == pytest.approx(10 ** -3, rel=0.1)
+
+
+def test_both_noise_floors_are_reported():
+    """Dummy inputs give a delta floor and a PAWN floor; real inputs clear them."""
+    import pandas as pd
+    from calculations.sensitivity import (
+        givendata_sensitivity_by_regime, summarize_givendata)
+    rng = np.random.default_rng(0)
+    X = rng.uniform(size=(1500, 3))
+    df = pd.DataFrame(X, columns=['a', 'b', 'c'])
+    df['flux'] = np.exp(4 * df['a'])            # only 'a' matters
+    res = givendata_sensitivity_by_regime({'r': df}, ['a', 'b', 'c'],
+                                          output_metrics=['flux'], verbose=False)
+    e = res['r']['flux']
+    assert 0 < e['floor'] < 0.2 and 0 < e['floor_pawn'] < 0.2
+    assert len(e['pawn']['median']) == 3        # dummies trimmed off
+    t = summarize_givendata(res, ['a', 'b', 'c']).set_index('parameter')
+    assert t.loc['a', 'pawn_over_floor'] > 3 and t.loc['a', 'delta_over_floor'] > 3
+
+
+def test_scan_stamp_records_the_scan_version(tmp_path):
+    from calculations.sensitivity import SCAN_VERSION, scan_version
+    assert scan_version(str(tmp_path)) is None
+    run_global_lhs_scan({'f_pinhole': [1e-5, 1e-1]}, 5, wrapper=level5_model_wrapper,
+                        output_fields=SCAN_OUTPUT_FIELDS_L5,
+                        label_fields=SCAN_LABEL_FIELDS_L5,
+                        save_path=str(tmp_path / 'scan_x.csv'), verbose=False)
+    assert scan_version(str(tmp_path)) == SCAN_VERSION

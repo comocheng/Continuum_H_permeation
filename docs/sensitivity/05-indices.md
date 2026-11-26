@@ -23,7 +23,19 @@ measure. Neither decomposes variance, which is why both survive an output spanni
 decades.
 
 **The dummy parameter** is one the model never reads. Whatever index it earns is noise,
-so it defines the floor.
+so it defines the floor. Twenty dummies give one floor per estimator, `floor` (δ) and
+`floor_pawn` (PAWN). δ's floor stays near 0.07 at any cluster size; PAWN's falls roughly
+as $1/\sqrt{n}$, which is why the clusters target 5000 rows.
+
+**These indices are regional.** A cluster is the set of draws from one regime's preset
+that the model put in that regime. An index therefore answers "within this regime, under
+this preset, how much does the output depend on this input?" It is conditional on the
+preset ranges, so a pinned or narrowed input cannot score highly, and on a selection made
+on the output, which makes the inputs within a cluster statistically dependent although
+the LHS drew them independently. Neither PAWN nor δ is then a global index. The notebooks
+repeat the analysis on each preset's full scan (Phase 4, `routeB_presetwide.csv`), which
+removes the selection but not the preset; a parameter that ranks very differently in the
+two owes its rank to the regime selection.
 
 Metrics analysed: `flux`, `permeability`, `theta`. The first two are analysed on
 `log10`, so the density estimators are not dominated by a few huge values; `theta`,
@@ -70,7 +82,8 @@ per column compares *rankings*, which is the question actually being asked.
 
 | Symptom | Meaning |
 |---|---|
-| A parameter at or below the dummy floor | Indistinguishable from no effect **in this regime, under this preset**. Not a general statement. |
+| A parameter at or below both dummy floors | Indistinguishable from no effect **in this regime, under this preset**. Not a general statement. |
+| Above the PAWN floor but not the δ floor | Expected for small effects at large n: PAWN's floor shrinks with n and δ's does not. |
 | A pinned parameter below the floor | Says nothing about its leverage — the preset removed its variance. Figure 20. |
 | PAWN and δ disagree sharply | Look at the cluster before believing either. Often a small or skewed cluster. |
 | Every parameter looks significant | The dummy floor has not been drawn. |

@@ -95,7 +95,7 @@ Controlled by `LOG_METRICS_DEFAULT`, currently `('flux', 'permeability')`.
 Cluster size is chosen adaptively rather than fixed. `size_draws_for_target`
 runs a short probe (`probe_n=250`) per preset to measure its yield — what
 fraction of draws actually land in the target regime — then scales up to reach
-`target_cluster=1500` rows, with a `safety=1.15` margin and an `n_max=200000`
+`target_cluster=5000` rows (`TARGET_CLUSTER_SIZE`), with a `safety=1.15` margin and an `n_max=200000`
 cap. `run_targeted_regime_scans(N_per_regime=None)` invokes this automatically
 and enforces `min_cluster=300`.
 
@@ -118,8 +118,16 @@ scoring appreciably above the dummy are resolved as sensitive; the rest are not
 resolved.
 
 `givendata_sensitivity_by_regime(..., n_dummy=N)` implements this, reporting
-`floor` and `delta_over_floor`. Because `floor = max(dummy indices)`, it is an
-order statistic over `n_dummy` samples.
+`floor` / `delta_over_floor` for δ and `floor_pawn` / `pawn_over_floor` for PAWN.
+Because each floor is the maximum over the dummies, it is an order statistic over
+`n_dummy` samples and rises with `n_dummy`; the default and both notebooks use 20,
+so floors compare between runs.
+
+The two floors behave differently with cluster size. On a synthetic test δ's floor
+went 0.13, 0.08, 0.08, 0.07 at n = 500, 1500, 3000, 6000 — its kernel-density bias
+does not shrink — while PAWN's went 0.13, 0.075, 0.05, 0.036, roughly as $1/\sqrt{n}$.
+So δ cannot resolve an effect much below 0.07 however large the cluster, and at the
+5000-row clusters now used PAWN is the more discriminating of the two.
 
 ### Below the floor does not mean "no physical effect"
 
