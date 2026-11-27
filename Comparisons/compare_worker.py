@@ -29,8 +29,8 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 warnings.filterwarnings('ignore')        # extrapolation notices: the inputs are the study's own
 
-from calculations.config.model_config import (CONDITIONS, METALS, OXIDES, MICROSTRUCTURE, OXIDE_DEFECTS,
-                                              STUDY_NAME, build_simulation_config,
+from calculations.config.model_config import (CONDITIONS, METALS, OXIDES, MICROSTRUCTURE, MODEL_OPTIONS,
+                                              OXIDE_DEFECTS, STUDY_NAME, build_simulation_config,
                                               get_surface_kinetics_from_config)
 from calculations.oxide_permeation import (get_oxide_properties_at_T, get_metal_properties_at_T,
                                            molecular_diffusion_flux)
@@ -84,7 +84,7 @@ def model1(level, T, P, Lox, Lm, f=None):
     p = props_at(T)
     ox, me = dict(p['ox'], thickness=Lox), dict(p['me'], thickness=Lm)
     D, K  = me['D_metal'], me['K_s_metal']
-    micro = dict(microstructure_params=MICROSTRUCTURE, lattice_density=MICROSTRUCTURE['N_L'], mode='both')
+    micro = dict(microstructure_params=MICROSTRUCTURE, enable_gb_enhancement=MODEL_OPTIONS['enable_gb_enhancement'])
     # the single-type branch for pinholes alone, never 'mixed', which would re-weight rather than add area
     defects = OXIDE_DEFECTS if f is None else {'type': 'pinhole', 'area_fraction': f}
     if level == 'L1':  return calculate_simple_metal_flux(D, K, Lm, P, P_down)['flux'], label_model1('L1')
@@ -105,16 +105,16 @@ def model2(level, T, P, Lox, Lm, f=None):
     sm   = p['sm']
     pin  = {} if SIM['oxide_defects'].get('use_sieverts_pinhole', False) else dict(k_diss_metal=sm['k_diss'],
                                                                                     K_eq_metal=sm['K_eq'])
-    mode = micro.get('mode', 'both')
+    gb   = MODEL_OPTIONS['enable_gb_enhancement']
     if level == 'L1L6':  r = solve_steady_state_flux_L1L6(P, P_down, Lm, sm['k_diss'], sm['K_eq'], Dm, Ksm)
     if level == 'L2aL6': r = solve_steady_state_flux_L2aL6(P, P_down, k, Keq, Dox, Kox, Lox)
     if level == 'L2bL6': r = solve_steady_state_flux_direct(P, P_down, Lm, k, Keq, Dox, Kox, Lox, Dm, Ksm)
     if level == 'L3L6':  r = calculate_mixed_defect_flux_L6(P, P_down, Lm, k, Keq, Dox, Kox, Lox, Dm, Ksm,
                                                             defects, **pin)
     if level == 'L4L6':  r = calculate_defective_metal_flux_L6(P, P_down, Lm, T, k, Keq, Dox, Kox, Lox, Dm, Ksm,
-                                                               microstructure_params=micro, mode=mode)
+                                                               microstructure_params=micro, enable_gb_enhancement=gb)
     if level == 'L5L6':  r = calculate_full_model_flux_L346_v2(P, P_down, Lm, T, k, Keq, Dox, Kox, Lox, Dm, Ksm,
-                                                               micro, defects, mode=mode, **pin)
+                                                               micro, defects, enable_gb_enhancement=gb, **pin)
     return r.get('J_total', r.get('J_ss', r.get('flux'))), label_model2(level, r, defects)
 
 
