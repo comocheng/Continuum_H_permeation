@@ -130,9 +130,8 @@ def test_no_trapping_code_remains(path):
 def test_sampled_E_D_reaches_the_grain_boundary_term():
     """The SA samples E_D; the GB enhancement must use the sampled value.
 
-    It used to read METALS[...]['E_D'] whatever the wrapper was given, so the
-    lattice diffusivity and the GB enhancement disagreed about E_D on every draw.
-    HAGB, small grains and low T make the enhancement large enough to see.
+    Otherwise the lattice diffusivity and the GB enhancement would disagree about
+    E_D on every draw. HAGB, small grains and low T make the enhancement large enough to see.
     """
     from calculations.defective_metal import metal_diffusivity
     micro = {'grain_size': 1e-6, 'gb_type': 'HAGB', 'gb_thickness': 1e-9}

@@ -457,8 +457,7 @@ def level5_model_wrapper(params_dict, return_full_record=False):
             'grain_shape':           full_params['grain_shape'],
             'gb_type':               full_params['gb_type'],
             'gb_thickness':          gb_thickness,
-            # the sampled E_D, so the GB enhancement moves with it (it used to
-            # read the config's E_D whatever the SA drew)
+            # the sampled E_D, so the GB enhancement moves with it
             'Q_bulk':                full_params['E_D'],
         }
 

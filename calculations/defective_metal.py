@@ -125,9 +125,8 @@ def gb_enhancement_factor(temperature, temperature_unit='K', gb_type='HAGB', dat
     Q_bulk : float, optional
         Lattice activation energy [J/mol] to use instead of the active metal's
         ``E_D``, with ``data_source='default'``. The SA wrappers pass the sampled
-        ``E_D`` here; without it the GB term kept the config value while the
-        lattice diffusivity used the sampled one, so a sampled ``E_D`` never
-        reached the enhancement.
+        ``E_D`` here, so the GB term and the lattice diffusivity use the same
+        activation energy.
     
     Returns
     -------
