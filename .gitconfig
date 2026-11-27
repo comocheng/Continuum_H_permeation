@@ -9,7 +9,10 @@
 
 # Commit the notebooks that .gitattributes marks filter=strip-outputs without their outputs;
 # the working copies keep them. required = true makes `git add` fail, rather than silently commit
-# the outputs, if the filter cannot run.
+# the outputs, if the filter cannot run. It applies to checkout as well, and a required filter
+# with no smudge command makes every checkout of these notebooks fail ("smudge filter failed"),
+# so smudge is the identity: a checkout writes the committed, output-free notebook as it is.
 [filter "strip-outputs"]
 	clean = python tools/strip_notebook_outputs.py
+	smudge = cat
 	required = true

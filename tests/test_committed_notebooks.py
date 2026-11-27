@@ -43,6 +43,14 @@ def test_staged_notebook_has_no_outputs(path):
                        f'(git config --local include.path ../.gitconfig) and re-add it.')
 
 
+def test_the_shipped_filter_survives_checkout():
+    """A required filter needs both halves: with no smudge, git refuses to check the notebooks out."""
+    def get(key):
+        return git('config', '--file', str(ROOT / '.gitconfig'), '--get', f'filter.strip-outputs.{key}').strip()
+    assert get('required') == 'true'
+    assert get('clean') and get('smudge') == 'cat'
+
+
 def test_strip_clears_outputs_and_timing_and_keeps_the_rest():
     nb = {'cells': [{'cell_type': 'code', 'execution_count': 3, 'source': ['x = 1'],
                      'outputs': [{'output_type': 'stream', 'text': ['1']}],
