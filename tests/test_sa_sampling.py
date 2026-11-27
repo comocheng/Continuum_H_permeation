@@ -120,3 +120,16 @@ def test_coverage_spanning_decades_gives_delta_in_range():
         lin = givendata_sensitivity_by_regime({'r': df}, ['a', 'b'], logit_metrics=(),
                                               **kw)['r']['theta']
     assert np.all(np.isnan(lin['delta']['delta']))
+
+
+def test_failed_scan_write_leaves_the_stamp_incomplete(tmp_path, monkeypatch):
+    """The stamp claims completion only after the scan file is written."""
+    import pandas as pd
+    from calculations.sensitivity import _save_scan, scan_version
+    def boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(pd.DataFrame, 'to_csv', boom)
+    with pytest.raises(OSError):
+        _save_scan(pd.DataFrame({'a': [1]}), str(tmp_path / 'scan_x.csv'))
+    assert scan_version(str(tmp_path)) == 0
+

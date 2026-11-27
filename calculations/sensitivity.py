@@ -1079,16 +1079,19 @@ def _save_scan(df, path, complete=True):
     batch are still to be written to this directory.
     """
     path = str(path)
-    _stamp_study(os.path.dirname(path), complete=complete)
+    directory = os.path.dirname(path)
+    # Incomplete while the file is being written; the requested state only once
+    # the write has succeeded, so a failed write never sits beside a current stamp.
+    _stamp_study(directory, complete=False)
     if path.endswith('.parquet'):
         try:
             df.to_parquet(path)
-            print(f"  saved scan -> {path}")
-            return
         except Exception as e:
             print(f"  parquet save failed ({e}); falling back to CSV")
             path = path.rsplit('.', 1)[0] + '.csv'
-    df.to_csv(path, index=False)
+    if not path.endswith('.parquet'):
+        df.to_csv(path, index=False)
+    _stamp_study(directory, complete=complete)
     print(f"  saved scan -> {path}")
 
 
