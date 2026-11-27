@@ -1291,9 +1291,9 @@ def plot_regime_exploration(partition, output_metrics=('flux', 'permeability', '
 # Rows wanted in each regime cluster. The dummy-parameter floor of PAWN falls
 # roughly as 1/sqrt(n) -- 0.13 at n=500, 0.075 at 1500, 0.036 at 6000 on a
 # synthetic test -- while delta's barely moves (0.13, 0.08, 0.07: its KDE bias
-# does not shrink). At 1500 both floors sat near 0.08 and many rankings were
-# inside them. 5000 halves the PAWN floor; the model evaluations it costs are
-# cheap (well under 1 ms per draw), and the indices parallelise.
+# does not shrink). At 1500 both floors sit near 0.08; 5000 roughly halves the
+# PAWN floor. The model evaluations it costs are cheap (well under 1 ms per
+# draw), and the indices parallelise.
 TARGET_CLUSTER_SIZE = 5000
 
 
