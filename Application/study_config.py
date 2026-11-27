@@ -95,8 +95,7 @@ OXIDE_DEFECTS = {
 SUGGESTED_RANGES_LEVEL5 = {
     # Metal transport (316L, Guo 2025). Pre-exponential +/- 2 decades and
     # activation energy +/- 15 kJ/mol about the METALS defaults (2.8e-11 m2/s,
-    # 52.1 kJ/mol at T_ref = 673 K). These were the Incoloy 802 ranges, which put
-    # the 316L default D_ref below the bottom of its own range.
+    # 52.1 kJ/mol at T_ref = 673 K), so the defaults sit mid-range.
     'D_ref':        [2.8e-13, 2.8e-9],
     'E_D':          [37000, 67000],
     'K_s_ref':      [1e-4, 0.1],
@@ -142,8 +141,7 @@ SUGGESTED_RANGES_LEVEL5L6 = {
     'K_eq_ref':            [1e-6, 1e-2],
     'H_eq':                [5000, 50000],
     # Metal surface kinetics, centred on the 316L defaults (2.63e-11 mol/m2/s/Pa,
-    # 55.0 kJ/mol at T_ref = 673 K) like the other studies centre on theirs. The
-    # Incoloy 802 ranges inherited here excluded both defaults.
+    # 55.0 kJ/mol at T_ref = 673 K), as the other studies centre on theirs.
     'k_diss_metal_ref':    [2.6287e-13, 2.6287e-9],
     'E_diss_metal':        [40000, 70000],
     'K_eq_metal_ref':      [1e-5, 1e-1],
