@@ -121,6 +121,7 @@ lists what it can see. See {doc}`config-file`.
 | `REGIME_LABELS_L5` | `('oxide', 'metal', 'defect')` | L5 | regimes without surface kinetics |
 | `REGIME_SA_METRICS` | `['flux', 'permeability', 'theta']` | stage 6 | metrics an index is computed for |
 | `LOG_METRICS_DEFAULT` | `('flux', 'permeability')` | stage 6 | analysed on a log₁₀ scale |
+| `LOGIT_METRICS_DEFAULT` | `('theta',)` | stage 6 | analysed as log₁₀(θ/(1−θ)) |
 | `TARGET_CLUSTER_SIZE` | `1500` | stage 4 | rows wanted in each regime cluster |
 | `min_cluster` | `300` | stage 3 | below this a regime is not analysed |
 | `seed` | `42` | stages 2, 5 | sampling seed |

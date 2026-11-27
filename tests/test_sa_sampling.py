@@ -101,3 +101,22 @@ def test_interrupted_batch_is_not_stamped_current(tmp_path):
     _stamp_study(str(tmp_path))
     assert scan_version(str(tmp_path)) == SCAN_VERSION
 
+
+def test_coverage_spanning_decades_gives_delta_in_range():
+    """A coverage spanning 15 decades breaks delta's density integral when analysed
+    linearly (delta >> 1); the default logit keeps it in [0, 1], and an
+    out-of-range delta is blanked rather than ranked."""
+    import pandas as pd
+    from calculations.sensitivity import givendata_sensitivity_by_regime
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame(rng.uniform(size=(1500, 2)), columns=['a', 'b'])
+    df['theta'] = 10 ** (-15 * df['a'])
+    kw = dict(output_metrics=['theta'], methods=('delta',), n_dummy=4,
+              delta_resamples=5, verbose=False, n_jobs=1)
+    d = givendata_sensitivity_by_regime({'r': df}, ['a', 'b'], **kw)['r']['theta']
+    assert d['logit'] and np.all((d['delta']['delta'] >= 0) & (d['delta']['delta'] <= 1))
+    assert d['delta']['delta'][0] > 3 * d['floor']
+    with pytest.warns(RuntimeWarning, match="delta set to NaN"):
+        lin = givendata_sensitivity_by_regime({'r': df}, ['a', 'b'], logit_metrics=(),
+                                              **kw)['r']['theta']
+    assert np.all(np.isnan(lin['delta']['delta']))

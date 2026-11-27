@@ -38,15 +38,20 @@ removes the selection but not the preset; a parameter that ranks very differentl
 two owes its rank to the regime selection.
 
 Metrics analysed: `flux`, `permeability`, `theta`. The first two are analysed on
-`log10`, so the density estimators are not dominated by a few huge values; `theta`,
-bounded in [0, 1], stays linear.
+`log10`, so the density estimators are not dominated by a few huge values. `theta` is
+analysed as its logit, `log10(theta / (1 - theta))`: it is bounded in (0, 1) but spans
+about 15 decades below 0.1 in the surface-limited cluster and runs from about 1e-12 to 0.99 in
+the metal cluster. Analysed linearly, it piles into a spike at 0 narrower than the
+grid δ integrates on, and δ came out between 60 and 3000. An entry whose δ still
+leaves [0, 1] gets NaN indices and a warning.
 
 ## Procedure
 
 1. Build a given-data problem from each cluster's sampled inputs.
 2. For each regime, each metric in `REGIME_SA_METRICS`, and each parameter, compute PAWN
    and δ on the cluster.
-3. Apply the `log10` transform to the metrics in `LOG_METRICS_DEFAULT`.
+3. Apply the `log10` transform to the metrics in `LOG_METRICS_DEFAULT` and the logit to
+   those in `LOGIT_METRICS_DEFAULT`.
 4. Rank per regime; `summarize_givendata` assembles the tables.
 5. `regime_comparison_matrix` column-normalises into one row per parameter and one
    column per regime, which is what the heatmap and the parallel-coordinates plot read.

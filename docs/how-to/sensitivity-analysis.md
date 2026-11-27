@@ -86,8 +86,9 @@ exactly what a regime-filtered cluster is.
 and density-based estimators get hijacked by a few enormous values — δ came out
 as 46 and −93389 in early runs, impossible for an index defined on [0,1]. Taking
 the logarithm asks what controls the *order of magnitude* of flux, which is the
-question worth answering anyway. `theta` is already on [0,1] and stays linear.
-Controlled by `LOG_METRICS_DEFAULT`, currently `('flux', 'permeability')`.
+question worth answering anyway. `theta` is bounded but spans decades too, so it is
+analysed as `log10(theta / (1 - theta))`. Controlled by `LOG_METRICS_DEFAULT`, currently
+`('flux', 'permeability')`, and `LOGIT_METRICS_DEFAULT`, currently `('theta',)`.
 ```
 
 ## Sizing the draws

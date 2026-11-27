@@ -257,6 +257,15 @@ overrides the geometry.
       selection contributes. Scans carry a `SCAN_VERSION` in their stamp, and the
       notebook cache refuses older ones.
 
+- [x] **delta for `theta` came out at 60-3000 (PR #2 review).** delta is bounded in
+      [0, 1]. `theta` was analysed linearly, but it spans about 15 decades below 0.1 in the
+      surface cluster and 1e-12 to 0.99 in the metal cluster, so its KDE is a spike narrower
+      than the 100-point grid delta integrates on. Only theta in the surface and metal
+      clusters was affected, but those numbers were reported as rankings.
+      **Fixed:** theta is analysed as log10(theta/(1-theta)) (`LOGIT_METRICS_DEFAULT`),
+      which brings every delta into range and the surface/theta floor from ~0.4 to ~0.07.
+      Any entry whose delta still exceeds 1 is set to NaN with a warning.
+
 - [x] **The SA ran serially, for hours per notebook.** Every model evaluation and every
       (regime, metric) PAWN/delta call ran one at a time, and delta dominates, at about
       30 s per (regime, metric) at 1500 rows.

@@ -71,8 +71,12 @@ REGIME_SA_METRICS = ['flux', 'permeability', 'theta']
 
 # Metrics analysed on a log10 scale so the density estimators behind PAWN/delta
 # aren't dominated by a few huge values (raw flux spans ~10 decades).
-# theta (∈[0,1]) stays linear.
 LOG_METRICS_DEFAULT = ('flux', 'permeability')
+# theta is a coverage on (0, 1), but in the surface-limited cluster it spans
+# ~15 decades below 0.1 and in the metal cluster runs from ~1e-12 up to 0.99.
+# Analysed linearly, it piles up in a spike at 0 and δ came out at 60-3000,
+# impossible for an index on [0, 1]. The logit resolves both ends.
+LOGIT_METRICS_DEFAULT = ('theta',)
 
 # --- L5 (no surface kinetics) ------------------------------------------------
 SCAN_OUTPUT_FIELDS_L5 = [
@@ -1565,7 +1569,8 @@ def givendata_sensitivity_by_regime(clusters, param_names, output_metrics=REGIME
                                     methods=('pawn', 'delta'), pawn_S=10,
                                     delta_resamples=100, seed=42,
                                     log_metrics=LOG_METRICS_DEFAULT, n_dummy=20,
-                                    verbose=True, n_jobs=None):
+                                    verbose=True, n_jobs=None,
+                                    logit_metrics=LOGIT_METRICS_DEFAULT):
     """
     Route B (primary): for each (regime, metric), run PAWN and Borgonovo-delta on the
     TRUE in-regime cluster — valid on arbitrary scattered points, zero new model evals.
@@ -1580,6 +1585,12 @@ def givendata_sensitivity_by_regime(clusters, param_names, output_metrics=REGIME
         parameter not clearly above both as unresolved. The floor is a maximum over
         the dummies, so it rises with n_dummy: compare floors only between runs
         that used the same n_dummy. Default 20. Set 0 to disable.
+    log_metrics, logit_metrics : sequences of metric names
+        Analysed as log10(Y) and log10(Y / (1 - Y)) respectively; any other metric
+        is analysed as it is. A metric spanning decades must be transformed: δ
+        integrates a KDE of Y on a 100-point grid, and a density spike narrower
+        than one grid step makes the integral, and δ, far exceed 1. An entry
+        whose δ still leaves [0, 1] gets NaN indices and a warning.
 
     Notes
     -----
@@ -1613,10 +1624,18 @@ def givendata_sensitivity_by_regime(clusters, param_names, output_metrics=REGIME
         for m in output_metrics:
             Y = cdf[m].to_numpy(dtype=float)
             use_log = m in log_metrics
-            mask = (np.isfinite(Y) & (Y > 0)) if use_log else np.isfinite(Y)
-            Xv = X[mask]
-            Yv = np.log10(Y[mask]) if use_log else Y[mask]
-            entry = {'n': int(mask.sum()), 'log': use_log}
+            use_logit = m in logit_metrics and not use_log
+            mask = np.isfinite(Y)
+            if use_log:
+                mask &= Y > 0
+            elif use_logit:
+                mask &= (Y > 0) & (Y < 1)
+            Xv, Yv = X[mask], Y[mask]
+            if use_log:
+                Yv = np.log10(Yv)
+            elif use_logit:
+                Yv = np.log10(Yv / (1.0 - Yv))
+            entry = {'n': int(mask.sum()), 'log': use_log, 'logit': use_logit}
             results[reg][m] = entry
             if entry['n'] < 10 or np.ptp(Yv) == 0:
                 entry['skipped'] = 'insufficient or degenerate output'
@@ -1639,6 +1658,17 @@ def givendata_sensitivity_by_regime(clusters, param_names, output_metrics=REGIME
     for (reg, m, _), out in zip(jobs, outs):
         entry = results[reg][m]
         entry.update(out)
+        # δ is half an L1 distance between densities, so it lies in [0, 1]. Outside
+        # that, the KDE integration has failed (see logit_metrics) and every δ in
+        # the entry, the floor included, is unreliable: blank them, don't rank them.
+        if 'delta' in entry and np.nanmax(entry['delta']['delta']) > 1.0:
+            import warnings
+            warnings.warn(f"[{reg}/{m}] delta reached "
+                          f"{np.nanmax(entry['delta']['delta']):.3g} > 1: the density "
+                          f"estimate failed; delta set to NaN. Transform the metric "
+                          f"(log_metrics / logit_metrics).", RuntimeWarning)
+            for k in ('delta', 'delta_conf'):
+                entry['delta'][k] = np.full(len(entry['delta'][k]), np.nan)
         # Noise floor = the best score any dummy achieved. Indices for the real
         # parameters are trimmed back to param_names so every downstream
         # consumer still sees exactly the parameters it asked for.
