@@ -1,10 +1,9 @@
-"""The Level 2b oxide/metal interface solve at the edges the SA now samples.
+"""The Level 2b oxide/metal interface solve at the edges of the SA ranges.
 
 Log-uniform sampling puts half the P_upstream draws below 1 Pa and reaches 1 nm
-oxides at 1e7 Pa. Both broke the brentq solve: an absolute xtol larger than the root
-at low pressure, and a fallback that assumed every unbracketable root was
-oxide-dominated. Each case is checked against the exact root of the quadratic in
-sqrt(P_int).
+oxides at 1e7 Pa. There the root can be far below any fixed absolute tolerance, or
+too close to either pressure limit for brentq to bracket. Each case is checked
+against the exact root of the quadratic in sqrt(P_int).
 """
 import numpy as np
 import pytest
@@ -21,7 +20,7 @@ def exact(P_up, P_down, ox, m):
 
 
 CASES = {
-    # P_int ~ 1e-14 Pa: below the old absolute xtol of 1e-12
+    # P_int ~ 1e-14 Pa: below a 1e-12 Pa absolute tolerance
     'low pressure': (1e-6, 0.0, {'D_ox': 1e-16, 'K_ox': 1.0, 'thickness': 1e-6},
                      {'D_metal': 1e-9, 'K_s_metal': 0.05, 'thickness': 1e-3}),
     # oxide so permeable that P_up - P_int < 1e-10 P_up: root above the bracket

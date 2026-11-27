@@ -190,12 +190,9 @@ def solve_interface_pressure(P_upstream, P_downstream, oxide_props, metal_props,
         
         if f_min * f_max > 0:
             # Same sign at both ends: the root lies within 1e-10 * P_upstream of a
-            # physical limit, outside the bracket. This used to fall back to P_min
-            # whichever limit it was, which is right for an oxide-dominated wall and
-            # catastrophically wrong for a metal-dominated one: on a 1 nm oxide at
-            # 1e7 Pa it returned 3e3 mol/m2/s for a wall that passes 3e-8.
-            # Log-uniform SA sampling reaches such walls routinely. Use the exact
-            # root instead; see _interface_closed_form.
+            # physical limit, outside the bracket. The root may be at either limit
+            # (oxide-dominated: near P_downstream; metal-dominated: near
+            # P_upstream), so take the exact root; see _interface_closed_form.
             P_interface = _interface_closed_form(P_upstream, P_downstream,
                                                  oxide_props, metal_props)
             converged = False
@@ -203,12 +200,9 @@ def solve_interface_pressure(P_upstream, P_downstream, oxide_props, metal_props,
         else:
             if method == 'brentq':
                 # Brent's method - robust and fast
-                # xtol is ABSOLUTE, in Pa. It used to be 1e-12, which at low
-                # upstream pressure is larger than the root itself: at P_up = 1e-6
-                # Pa the interface sits near 1e-14 Pa, brentq stopped at the
-                # bracket edge, and the result carried a ~95% flux imbalance while
-                # reporting converged=True. Every root is >= P_min, so an xtol far
-                # below P_min leaves rtol in charge at every pressure.
+                # xtol is ABSOLUTE, in Pa, and the root can be far below 1 Pa
+                # (near 1e-14 Pa at P_up = 1e-6 Pa). Every root is >= P_min, so an
+                # xtol far below P_min leaves rtol in charge at every pressure.
                 P_interface = brentq(
                     flux_balance_equation,
                     P_min, P_max,
