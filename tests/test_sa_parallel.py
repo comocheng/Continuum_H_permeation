@@ -19,7 +19,7 @@ def test_parallel_scan_is_identical_to_serial():
               verbose=False)
     a, _ = run_global_lhs_scan(ranges, PARALLEL_MIN_DRAWS, n_jobs=1, **kw)
     b, _ = run_global_lhs_scan(ranges, PARALLEL_MIN_DRAWS, n_jobs=3, **kw)
-    pd.testing.assert_frame_equal(a, b)
+    pd.testing.assert_frame_equal(a, b, check_exact=True)
 
 
 def test_parallel_indices_are_identical_to_serial():

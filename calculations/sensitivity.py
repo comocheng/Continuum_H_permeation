@@ -903,7 +903,8 @@ def level5L6_model_wrapper(params_dict, return_full_record=False):
     except Exception as e:
         return _failed_record(
             'level5L6_model_wrapper', e, full_params, return_full_record,
-            numeric=SCAN_OUTPUT_FIELDS + ['D_metal', 'K_s_metal', 'D_ox', 'K_ox',
+            numeric=SCAN_OUTPUT_FIELDS + ['D_modification',
+                                          'D_metal', 'K_s_metal', 'D_ox', 'K_ox',
                                           'k_diss', 'K_eq', 'k_diss_metal', 'K_eq_metal'],
             labels=('system_rate_limiting', 'dominant_path'))
 

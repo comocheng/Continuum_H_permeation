@@ -23,6 +23,7 @@ def test_failure_returns_nan_and_undefined(wrapper):
     with pytest.warns(RuntimeWarning, match="failed"):
         rec = wrapper(IMPOSSIBLE, return_full_record=True)
     assert np.isnan(rec['flux']) and np.isnan(rec['permeability'])
+    assert np.isnan(rec['D_modification'])   # returned on success, so NaN on failure
     assert rec['regime'] == 'undefined'
     assert rec['error']
 
