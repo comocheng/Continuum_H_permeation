@@ -90,3 +90,14 @@ def test_scan_stamp_records_the_scan_version(tmp_path):
                         label_fields=SCAN_LABEL_FIELDS_L5,
                         save_path=str(tmp_path / 'scan_x.csv'), verbose=False)
     assert scan_version(str(tmp_path)) == SCAN_VERSION
+
+
+def test_interrupted_batch_is_not_stamped_current(tmp_path):
+    """Until a batch's last scan is written the stamp must not claim SCAN_VERSION,
+    or a cache check would accept old scans left beside the new ones."""
+    from calculations.sensitivity import SCAN_VERSION, scan_version, _stamp_study
+    _stamp_study(str(tmp_path), complete=False)
+    assert scan_version(str(tmp_path)) == 0
+    _stamp_study(str(tmp_path))
+    assert scan_version(str(tmp_path)) == SCAN_VERSION
+

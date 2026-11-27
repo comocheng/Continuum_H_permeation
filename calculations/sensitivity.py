@@ -1024,11 +1024,13 @@ def scan_version(directory):
     with open(stamp) as fh:
         for line in fh:
             if line.startswith('scan_version:'):
-                return int(line.split(':', 1)[1])
+                v = line.split(':', 1)[1].strip()
+                # 'incomplete': a batch of scans was interrupted part-way
+                return int(v) if v.isdigit() else 0
     return 1
 
 
-def _stamp_study(directory):
+def _stamp_study(directory, complete=True):
     """Record which study produced the files in ``directory``, and shout if it changed.
 
     The scan CSVs carry no study identifier, so a results folder copied from another
@@ -1036,6 +1038,10 @@ def _stamp_study(directory):
     another folder's study — is indistinguishable from a fresh run of this one. It writes the
     active study beside the results and warns when a directory that already held one
     study's output starts receiving another's.
+
+    ``complete=False`` records the scan version as 'incomplete' (read back as 0 by
+    scan_version), for a directory part-way through a batch of scans: until the
+    last one is written, files from an older design may sit beside the new ones.
     """
     from calculations.config.model_config import (
         ACTIVE_STUDY_NAME, ACTIVE_STUDY_PATH, ACTIVE_STUDY_SOURCE,
@@ -1059,13 +1065,17 @@ def _stamp_study(directory):
         fh.write(f"study:  {ACTIVE_STUDY_NAME}\n"
                  f"path:   {ACTIVE_STUDY_PATH}\n"
                  f"source: {ACTIVE_STUDY_SOURCE}\n"
-                 f"scan_version: {SCAN_VERSION}\n")
+                 f"scan_version: {SCAN_VERSION if complete else 'incomplete'}\n")
 
 
-def _save_scan(df, path):
-    """Persist the scan DataFrame; parquet if requested+available, else CSV."""
+def _save_scan(df, path, complete=True):
+    """Persist the scan DataFrame; parquet if requested+available, else CSV.
+
+    ``complete`` is passed to _stamp_study: False while more scans of the same
+    batch are still to be written to this directory.
+    """
     path = str(path)
-    _stamp_study(os.path.dirname(path))
+    _stamp_study(os.path.dirname(path), complete=complete)
     if path.endswith('.parquet'):
         try:
             df.to_parquet(path)
@@ -1492,13 +1502,16 @@ def run_targeted_regime_scans(N_per_regime=None, regimes=('metal', 'surface', 'o
         raise KeyError(f"no preset for regime(s) {missing}; presets has {list(presets)}")
 
     clusters, scans, yields = {}, {}, {}
-    for r in regimes:
+    for i, r in enumerate(regimes):
         if verbose:
             print(f"\n--- targeted scan: {r} (N={N_per_regime[r]}) ---")
-        save_path = (f"{save_dir.rstrip('/')}/scan_{r}.csv" if save_dir else None)
         df, _ = run_global_lhs_scan(presets[r], N_per_regime[r], seed=seed,
-                                    wrapper=wrapper, save_path=save_path,
-                                    verbose=False, **scan_kw)
+                                    wrapper=wrapper, verbose=False, **scan_kw)
+        if save_dir:
+            # The stamp claims SCAN_VERSION only once the last scan is written,
+            # so an interrupted batch never passes a notebook's cache check.
+            _save_scan(df, os.path.join(save_dir, f"scan_{r}.csv"),
+                       complete=(i == len(regimes) - 1))
         df['target_preset'] = r
         cluster = df[df['regime'] == r].reset_index(drop=True)
         clusters[r], scans[r] = cluster, df
