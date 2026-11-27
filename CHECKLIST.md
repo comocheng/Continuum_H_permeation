@@ -346,8 +346,8 @@ overrides the geometry.
       `_L5L6` re-run in `Guo_etal_2025/`, `Fuerst_et_al_2024/` and `incoloy802_cr2o3/`
       (which also replaces the Fuerst and Incoloy copies that held another study's
       outputs), ~16-20 min each with the parallel SA. The `regime_parallel_coords*`
-      notebooks ran cleanly and stay committed without outputs. `Application/` keeps
-      its older, pre-isothermal notebooks; they were not re-run.
+      notebooks ran cleanly and stay committed without outputs. `Application/`, a stale
+      copy of the Guo study, was deleted on 2026-11-27.
 
 - [x] **`docs/two-models` is unmerged**, 8 commits ahead of `main`, and edits two of the
       same documentation pages as the current branch — `docs/api/config.md` and

@@ -171,7 +171,6 @@ repository root is the live list; this section is the documentation-facing summa
 |---|---|---|
 | Split `K_ox` into model-specific names | One symbol carries two incommensurable quantities. The configuration declares `K_ox_ref` in Sieverts units, which is right for Model 2 and wrong for Model 1. | A rename across the oxide path, plus re-pinning the container gate's reference values. |
 | Document `arrhenius()` as scalar-only, or vectorise it | It raises on array input, and its docstring does not say so. | One docstring line, or a `np.asarray` guard. |
-| Drop `Application/` from the study-resolution listing | It is offered as a valid study although it is excluded from releases. | One line, plus the tests that reference it. |
 | Reconcile `METALS` keys across studies | Disjoint keys block a clean study switch. | Touches every study file; invalidates pinned values. |
 | Add `eta_surf` to the regime metrics on demand | It carries the whole surface effect in one dimensionless number, but costs ~33% more analysis time. | A flag rather than a constant. |
 

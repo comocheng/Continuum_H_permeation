@@ -301,10 +301,10 @@ Source: {doc}`how-to/switch-study`
 ### The verifier reports four pre-existing problems on the active study
 
 ```{warning}
-On the 316L studies (`Guo_etal_2025/`, `Application/`) this currently reports **four
+On the 316L study (`Guo_etal_2025/`) this currently reports **four
 pre-existing problems** — `D_ref`, `k_diss_metal_ref` and `E_diss_metal` defaults
 lying outside their own sweep ranges. They are not caused by switching; they are
-present in those studies' files as shipped, and the Incoloy and Hastelloy N studies
+present in that study's file as shipped, and the Incoloy and Hastelloy N studies
 report clean.
 
 A default outside its sweep range means the sensitivity analysis never evaluates the

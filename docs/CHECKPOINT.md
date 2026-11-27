@@ -176,6 +176,12 @@ Answered, 2026-10-09:
   and an Appendix A entry.
 - **Q3, the `Application/` figure PNGs** — ignore them; documentation figures come only
   from `make_figures.py`. The old PNGs stay in place as history.
+
+Answered, 2026-11-27:
+
+- **Q2 and Q5, `Application/`** — deleted from the repository, with its references in the
+  tests and docs. It was a stale copy of `Guo_etal_2025/`; the study listing is
+  discovered from the folders, so it no longer offers it. Its PNGs remain in git history.
 - **Sequencing** — scaffold first, then the prose parts. Scaffold is now done.
 
 ---
@@ -210,7 +216,7 @@ behaviour. Each of these came out of writing `check_equations.py` and `make_figu
 | F2 | `arrhenius()` validates with a bare `if temperature <= 0`, so it raises on array input. Scalar-only, and the docstring does not say so. | documented at the call site in `make_figures.py`; candidate CHECKLIST item |
 | F3 | Grain-boundary enhancement is negligible at structural grain sizes — 1.0016× at 20 µm, 1.66× even at 50 nm. Level 4 is a trapping model with a GB term that rounds away. This was not stated anywhere. | now Figure 12; belongs in the Level 4 chapter |
 | F4 | Permeability is reported in **four** tiers, not three (intrinsic, effective-layer, stack, apparent), per commit `5d3e94a`. Earlier notes said three. | corrected; Figure 15 |
-| F5 | The study-resolution error lists `Application/` as a valid study although it is excluded from releases. | open, Q5 |
+| F5 | The study-resolution error lists `Application/` as a valid study although it is excluded from releases. | fixed 2026-11-27: folder deleted |
 | F6 | **`worked_values.py --check` was failing on `main`.** Commit `366b70d` ("Get the GB enhancement from the metal, not from a table of austenitic steel") changed `D_eff`, and the stored copy was never regenerated — so the published docs quoted stale numbers in `getting-started.md`, `theory/level4-microstructure.md`, `theory/level5-full-system.md` and `caveats.md`. | **fixed** — regenerated and every prose quote corrected |
 | F7 | `theory/level5-full-system.md`'s values block was computed at a **48 nm** coating while the configured thickness is **1 µm**, and the block is not covered by `worked_values.py`, so it could not be caught. | **fixed** — replaced with the canonical wrapper values, which are generated and diffed |
 | F8 | The same 48 nm staleness ran through `level2-oxide.md` (α, $P_{int}$, flux, resistances) and `level6-surface-kinetics.md`, where the L5L6 block still reported **`regime = metal`**. At the configured 1 µm the wall is **`regime = oxide`** — `frac_oxide` is 0.696, not 0.107. The chapter asserted the opposite of what the model now returns. | **fixed**, all recomputed and verified |
