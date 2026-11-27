@@ -1,9 +1,9 @@
 """How the sensitivity scan places its samples.
 
-Most SA ranges span several decades (f_pinhole 1e-5..0.1, P_upstream 1e-7..1e7 Pa).
-Drawn uniformly in linear space, 99.9% of f_pinhole draws land above 1e-4 and the
-indices describe only the top decade of the range. These tests pin the log-uniform
-design that replaced it.
+Most SA ranges span several decades (f_pinhole 1e-5..0.1, P_upstream 1e-7..1e7 Pa),
+so scale parameters are drawn log-uniformly: each decade of a stated range gets the
+same number of draws. (Drawn uniformly in linear space, 99.9% of f_pinhole draws
+would land above 1e-4.) Energies and temperature stay linear.
 """
 import numpy as np
 import pytest
