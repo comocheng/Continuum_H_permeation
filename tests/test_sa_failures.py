@@ -1,9 +1,9 @@
 """A model evaluation that fails must be visible as a failure.
 
-The wrappers used to catch every exception, print a traceback and return flux = 1e-20,
-which is -20 on the log10 scale the indices use. The row was labelled 'undefined' and
-quietly dropped from every cluster. A NaN total flux in L5L6 was worse: every flux
-weight became 0 and argmax over (0, 0, 0) labelled the row 'surface'.
+A failed evaluation returns NaN outputs, regime 'undefined' and an 'error' message,
+and the scan counts failures out loud. A sentinel flux such as 1e-20 would read as
+-20 on the log10 scale the indices use, and a NaN total flux in L5L6 would make every
+flux weight 0, so argmax over (0, 0, 0) would label the row 'surface'.
 """
 import numpy as np
 import pytest

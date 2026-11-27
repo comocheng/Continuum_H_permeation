@@ -298,8 +298,9 @@ def _failed_record(wrapper_name, exc, full_params, return_full_record,
                    numeric, labels):
     """The record a wrapper returns when the model raises: NaN, not a sentinel.
 
-    Outputs are NaN so a failure can never be mistaken for a real, tiny flux --
-    the old 1e-20 sentinel became -20 on the log10 scale the indices use -- and
+    Outputs are NaN so a failure can never be mistaken for a real, tiny flux
+    (a sentinel such as 1e-20 would become -20 on the log10 scale the indices
+    use), and
     ``regime`` is 'undefined' so the row joins no cluster. ``error`` carries the
     message; run_global_lhs_scan counts and reports these rather than letting
     them vanish from the clusters unannounced.
@@ -806,8 +807,8 @@ def level5L6_model_wrapper(params_dict, return_full_record=False):
 
         if not np.isfinite(r['J_total']):
             # A path whose coverage solve failed returns flux = NaN, which makes
-            # J_total NaN and every flux weight 0 -- and argmax over (0, 0, 0)
-            # labelled the row 'surface'. Treat it as the failure it is.
+            # J_total NaN and every flux weight 0, and argmax over (0, 0, 0)
+            # would label the row 'surface'. Treat it as the failure it is.
             failed = [k for k, d in r.get('defect_paths', {}).items()
                       if not np.isfinite(d['path_result']['flux'])]
             if not np.isfinite(r['intact_path']['flux']):
