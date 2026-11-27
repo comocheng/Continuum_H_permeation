@@ -17,24 +17,25 @@ A surface step is named for the surface the gas meets on that path: the oxide on
 area, under cracks and over oxide grain boundaries; the bare metal under pinholes and on a wall
 with no oxide.
 
-Labels read ``<path>/<step>[/<metal detail>]`` for a wall with defects, e.g.
-``pinholes/metal surface`` or ``intact/metal diffusion/traps``, and ``<step>[/<metal detail>]``
-for a wall that is a single path, e.g. ``oxide surface``. The metal detail, ``traps`` or
-``lattice``, appears only on the levels with a defective metal (L4, L5 and their +L6 forms).
+Labels read ``<path>/<step>`` for a wall with defects, e.g. ``pinholes/metal surface`` or
+``intact/oxide diffusion``, and ``<step>`` for a wall that is a single path, e.g.
+``oxide surface``. The metal has one diffusivity on every level (the lattice value, raised by
+grain-boundary fast paths on L4 and L5; trapping does not change a steady flux), so
+``metal diffusion`` needs no further qualifier.
 
 Model 1 has no surface step, because its surface is at equilibrium. Its oxide/metal call is the
 interface solver's own: oxide when R_oxide/R_metal > 10, metal when < 0.5, otherwise mixed.
-Model 2's is the solver's ``rate_limiting``: the step holding more than half the path's
-resistance, otherwise mixed. Nothing here re-derives either rule; this module only names what
-the solvers return and decides which path dominates.
+Model 2's is the solver's ``rate_limiting``: the step whose degree of rate control exceeds one
+half, otherwise mixed. Nothing here re-derives either rule; this module only names what the
+solvers return and decides which path dominates.
 """
 
 import numpy as np
 
-from calculations.classify_regime import classify_regime_level4_metal
-from calculations.permeation_calc import calculate_simple_metal_flux, calculate_defective_metal_flux
-# calculations.interface_solver is imported inside model1_paths(): it loads the active study's config,
-# and describe()/fitted() must import without one -- the study comparison runs outside every study.
+from calculations.permeation_calc import calculate_simple_metal_flux
+# calculations.interface_solver and calculations.defective_metal are imported inside model1_paths():
+# they load the active study's config, and describe()/fitted() must import without one -- the study
+# comparison runs outside every study.
 
 #: A path dominates when it carries more than this share of the wall's flux.
 DOMINANCE = 0.5
@@ -50,9 +51,6 @@ SURFACE_OF = {'intact': 'oxide surface', 'pinhole': 'metal surface',
 SINGLE_PATH_SURFACE = {'L1L6': 'metal surface', 'L2aL6': 'oxide surface',
                        'L2bL6': 'oxide surface', 'L4L6': 'oxide surface'}
 
-#: Levels whose metal is defective, so a metal-diffusion step says whether traps control it.
-DEFECTIVE_METAL = {'L4', 'L5', 'L4L6', 'L5L6'}
-
 _COMPONENT_KEY = {'pinhole': 'pinholes', 'crack': 'cracks', 'grain_boundary': 'grain_boundaries'}
 _MODEL2_STEP   = {'oxide': 'oxide diffusion', 'metal': 'metal diffusion', 'mixed': 'mixed'}
 
@@ -61,34 +59,26 @@ _MODEL2_STEP   = {'oxide': 'oxide diffusion', 'metal': 'metal diffusion', 'mixed
 # Building a label
 # =============================================================================
 
-def compose(step, detail='', path=None):
+def compose(step, path=None):
     """``'pinholes/metal surface'`` from its parts; ``path`` is a solver key or None for one path."""
-    return '/'.join(([PATH_NAMES[path]] if path else []) + [step] + ([detail] if detail else []))
+    return '/'.join(([PATH_NAMES[path]] if path else []) + [step])
 
 
 def parse(label):
-    """``(path name or None, step, metal detail)`` from a label: the inverse of :func:`compose`."""
+    """``(path name or None, step)`` from a label: the inverse of :func:`compose`."""
     parts = label.split('/')
     path = parts.pop(0) if parts[0] in PATH_NAMES.values() else None
-    return path, parts[0], (parts[1] if len(parts) > 1 else '')
-
-
-def trap_detail(modification_factor):
-    """``'traps'`` when trapping slows the metal (D_eff/D_lattice below the Level 4 cut), else ``'lattice'``."""
-    return 'traps' if classify_regime_level4_metal(modification_factor)['trapping_significant'] else 'lattice'
+    return path, parts[0]
 
 
 def model1_step(regime):
-    """A Model 1 regime string as ``(step, metal detail)``.
+    """A Model 1 regime string as a step.
 
-    ``'oxide_limited'`` -> ``('oxide diffusion', '')``; ``'metal_limited/traps_defect_limited'``
-    -> ``('metal diffusion', 'traps')``; ``'transition'`` -> ``('mixed', '')``.
+    ``'oxide_limited'`` and ``'oxide_limited/defect_limited'`` -> ``'oxide diffusion'``;
+    ``'metal_limited'`` -> ``'metal diffusion'``; ``'transition'`` -> ``'mixed'``.
     """
-    base, *rest = regime.split('/')
-    step = {'oxide_limited': 'oxide diffusion', 'metal_limited': 'metal diffusion'}.get(base, 'mixed')
-    if step != 'metal diffusion' or not rest:
-        return step, ''
-    return step, ('traps' if rest[0].startswith('traps') else 'lattice')
+    base = regime.split('/')[0]
+    return {'oxide_limited': 'oxide diffusion', 'metal_limited': 'metal diffusion'}.get(base, 'mixed')
 
 
 def label_from_paths(paths, J_total):
@@ -97,7 +87,7 @@ def label_from_paths(paths, J_total):
     Parameters
     ----------
     paths : dict
-        ``{solver path key: {'contribution': ..., 'step': ..., 'detail': ...}}``, as returned by
+        ``{solver path key: {'contribution': ..., 'step': ...}}``, as returned by
         :func:`model1_paths` or :func:`model2_paths`.
     J_total : float
         The wall's flux, which the contributions add up to.
@@ -108,7 +98,7 @@ def label_from_paths(paths, J_total):
     top = max(share, key=share.get)
     if not share[top] > DOMINANCE:
         return 'mixed'
-    return compose(paths[top]['step'], paths[top]['detail'], top)
+    return compose(paths[top]['step'], top)
 
 
 # =============================================================================
@@ -139,6 +129,10 @@ def model1_paths(level, P_up, P_down, oxide_props, metal_props, defects, tempera
     each path is re-solved here with the solver those modules use for it, with the same defaults:
     the intact, crack and grain-boundary paths with the oxide + metal system (thin oxide for a
     crack, faster oxide diffusion for a grain boundary), and a pinhole with the metal alone.
+    Level 5 is Level 3 with the metal's diffusivity from
+    :func:`calculations.defective_metal.metal_diffusivity`, exactly as
+    :func:`calculations.parallel_oxide_defect_paths.calculate_parallel_path_flux_defective_metal`
+    builds it.
 
     Parameters
     ----------
@@ -146,53 +140,42 @@ def model1_paths(level, P_up, P_down, oxide_props, metal_props, defects, tempera
     P_up, P_down : float
         Upstream and downstream pressure [Pa].
     oxide_props, metal_props : dict
-        The layer properties the wall was solved with, ``thickness`` included.
+        The layer properties the wall was solved with, ``thickness`` included; ``D_metal`` is
+        the lattice diffusivity.
     defects : dict
         The OXIDE_DEFECTS-format dict the wall was solved with.
     temperature : float, optional
         [K]. L5 only.
     micro : dict, optional
-        The keyword arguments the L5 solver was given: ``microstructure_params``,
-        ``lattice_density`` and ``mode``. L5 only.
+        The keyword arguments the L5 solver was given: ``microstructure_params`` and,
+        optionally, ``enable_gb_enhancement``. L5 only.
 
     Returns
     -------
     dict
-        ``{path key: {'contribution', 'flux', 'step', 'detail', 'fraction_surface',
-        'fraction_oxide', 'fraction_metal'}}``. Contributions are area-weighted, so they add up
-        to the wall's flux.
+        ``{path key: {'contribution', 'flux', 'step', 'fraction_surface', 'fraction_oxide',
+        'fraction_metal'}}``. Contributions are area-weighted, so they add up to the wall's flux.
     """
-    from calculations.interface_solver import (calculate_oxide_metal_system,
-                                               calculate_oxide_defective_metal_system)
-    defective = level == 'L5'
-
-    def two_layer(ox):
-        if defective:
-            return calculate_oxide_defective_metal_system(P_up, P_down, ox, metal_props, temperature, **micro)
-        return calculate_oxide_metal_system(P_up, P_down, ox, metal_props)
+    from calculations.interface_solver import calculate_oxide_metal_system
+    if level == 'L5':
+        from calculations.defective_metal import metal_diffusivity
+        D_metal = metal_diffusivity(metal_props['D_metal'], temperature, **micro)
+        metal_props = {**metal_props, 'D_metal': D_metal}
 
     def described(r, area):
-        step, _ = model1_step(r['regime'])
-        detail = trap_detail(r['modification_factor']) if (defective and step == 'metal diffusion') else ''
         R_ox, R_m = r['R_oxide'], r['R_metal']
-        return {'contribution': area * r['flux'], 'flux': r['flux'], 'step': step, 'detail': detail,
+        return {'contribution': area * r['flux'], 'flux': r['flux'], 'step': model1_step(r['regime']),
                 'fraction_surface': 0.0,                          # the surface is at equilibrium
                 'fraction_oxide': R_ox / (R_ox + R_m), 'fraction_metal': R_m / (R_ox + R_m)}
 
     fractions = defect_fractions(defects)
-    paths = {'intact': described(two_layer(oxide_props), 1.0 - sum(fractions.values()))}
+    paths = {'intact': described(calculate_oxide_metal_system(P_up, P_down, oxide_props, metal_props),
+                                 1.0 - sum(fractions.values()))}
     for kind, area in fractions.items():
         if kind == 'pinhole':                                     # no oxide on this path: the metal alone
-            if defective:
-                r = calculate_defective_metal_flux(D_lattice=metal_props['D_metal'], K_s=metal_props['K_s_metal'],
-                                                   metal_thickness=metal_props['thickness'], P_up=P_up,
-                                                   P_down=P_down, temperature=temperature, **micro)
-                step, detail = model1_step(r['regime'])
-            else:
-                r = calculate_simple_metal_flux(metal_props['D_metal'], metal_props['K_s_metal'],
-                                                metal_props['thickness'], P_up, P_down)
-                step, detail = 'metal diffusion', ''
-            paths[kind] = {'contribution': area * r['flux'], 'flux': r['flux'], 'step': step, 'detail': detail,
+            r = calculate_simple_metal_flux(metal_props['D_metal'], metal_props['K_s_metal'],
+                                            metal_props['thickness'], P_up, P_down)
+            paths[kind] = {'contribution': area * r['flux'], 'flux': r['flux'], 'step': 'metal diffusion',
                            'fraction_surface': 0.0, 'fraction_oxide': 0.0, 'fraction_metal': 1.0}
             continue
         ox = dict(oxide_props)
@@ -200,7 +183,7 @@ def model1_paths(level, P_up, P_down, oxide_props, metal_props, defects, tempera
             ox['thickness'] = oxide_props['thickness'] * defects.get('thickness_factor', 0.1)
         else:
             ox['D_ox'] = oxide_props['D_ox'] * defects.get('diffusivity_factor', 10)
-        paths[kind] = described(two_layer(ox), area)
+        paths[kind] = described(calculate_oxide_metal_system(P_up, P_down, ox, metal_props), area)
     return paths
 
 
@@ -208,18 +191,18 @@ def label_model1(level, result=None, P_up=None, P_down=None, oxide_props=None, m
                  defects=None, temperature=None, micro=None):
     """Label for one Model 1 point, from the level's own solver result.
 
-    L1 and L2a need no result: a perfect metal is limited by metal diffusion and an oxide alone
-    by oxide diffusion. L2b and L4 are one path, labelled from their solver's regime. L3 and L5
-    re-solve each path (:func:`model1_paths`, which takes the remaining arguments) and raise if
-    the paths do not add up to the wall flux the parallel-path solver returned in ``result``.
+    L1, L2a and L4 need no result: a bare metal (perfect or polycrystalline) is limited by metal
+    diffusion and an oxide alone by oxide diffusion. L2b is one path, labelled from its solver's
+    regime. L3 and L5 re-solve each path (:func:`model1_paths`, which takes the remaining
+    arguments) and raise if the paths do not add up to the wall flux the parallel-path solver
+    returned in ``result``.
     """
-    if level == 'L1':
+    if level in ('L1', 'L4'):
         return 'metal diffusion'
     if level == 'L2a':
         return 'oxide diffusion'
-    if level in ('L2b', 'L4'):
-        step, detail = model1_step(result['regime'])
-        return compose(step, detail if level in DEFECTIVE_METAL else '')
+    if level == 'L2b':
+        return model1_step(result['regime'])
     paths = model1_paths(level, P_up, P_down, oxide_props, metal_props, defects, temperature, micro)
     J_total = result['flux_total']
     J_paths = sum(d['contribution'] for d in paths.values())
@@ -242,16 +225,13 @@ def model2_paths(level, result):
     """Every path of a Model 2 wall with defects (L3+L6 or L5+L6), from the solver's own breakdown.
 
     Returns the same structure as :func:`model1_paths`. The surface/oxide/metal fractions are the
-    solver's resistance split for each path.
+    solver's degrees of rate control for each path, which sum to one.
     """
     def described(path_result, surface, contribution):
-        step = model2_step(path_result, surface)
-        detail = (trap_detail(path_result['D_eff'] / path_result['D_lattice'])
-                  if (level == 'L5L6' and step == 'metal diffusion') else '')
         res = path_result.get('resistances') or {}
-        return {'contribution': contribution, 'flux': path_result.get('flux', np.nan), 'step': step,
-                'detail': detail, **{k: res.get(k, np.nan)
-                                     for k in ('fraction_surface', 'fraction_oxide', 'fraction_metal')}}
+        return {'contribution': contribution, 'flux': path_result.get('flux', np.nan),
+                'step': model2_step(path_result, surface),
+                **{k: res.get(k, np.nan) for k in ('fraction_surface', 'fraction_oxide', 'fraction_metal')}}
 
     paths = {'intact': described(result['intact_path'], SURFACE_OF['intact'],
                                  result['flux_breakdown']['intact']['contribution'])}
@@ -273,10 +253,7 @@ def label_model2(level, result, defects=None):
         if any(k not in result.get('defect_paths', {}) for k in requested) or not np.isfinite(J_total):
             return 'undefined'
         return label_from_paths(model2_paths(level, result), J_total)
-    step = model2_step(result, SINGLE_PATH_SURFACE[level])
-    detail = (trap_detail(result['D_eff'] / result['D_lattice'])
-              if (level in DEFECTIVE_METAL and step == 'metal diffusion') else '')
-    return compose(step, detail)
+    return model2_step(result, SINGLE_PATH_SURFACE[level])
 
 
 # =============================================================================
@@ -294,22 +271,18 @@ STEP_STYLE = {
 }
 _DOMINANT_WORDS = {'intact': 'Intact oxide dominant', 'pinholes': 'Pinholes dominant',
                    'cracks': 'Cracks dominant', 'oxide GBs': 'Oxide GBs dominant'}
-_DETAIL_WORDS   = {'lattice': 'lattice', 'traps': 'trap-controlled'}
 
 
 def describe(label):
     """``(legend name, colour, marker, fill)`` for one label.
 
-    Colour is the limiting step, a diamond marks trap control, and a hollow marker means a defect
-    path (pinholes, cracks or oxide grain boundaries) carries most of the flux.
+    Colour and marker are the limiting step, and a hollow marker means a defect path (pinholes,
+    cracks or oxide grain boundaries) carries most of the flux.
     """
-    path, step, detail = parse(label)
+    path, step = parse(label)
     if path is None and step == 'mixed':                          # no path carries more than half
         return ('No path carries more than half the flux (not fitted)', '#898781', 'X', 'filled')
     words, colour, marker = STEP_STYLE.get(step, (step, '#52514e', 'o'))
-    if detail:
-        words += f', {_DETAIL_WORDS[detail]}'
-        marker = 'D' if detail == 'traps' else marker
     name = f'{_DOMINANT_WORDS[path]}: {words}' if path else words[0].upper() + words[1:]
     return name, colour, marker, ('hollow' if path not in (None, 'intact') else 'filled')
 

@@ -12,7 +12,7 @@ import math
 import numpy as np
 import pytest
 
-from calculations.config.model_config import (CONDITIONS, METALS, MICROSTRUCTURE, OXIDE_DEFECTS,
+from calculations.config.model_config import (CONDITIONS, METALS, MICROSTRUCTURE, MODEL_OPTIONS, OXIDE_DEFECTS,
                                               build_simulation_config, get_surface_kinetics_from_config)
 from calculations.oxide_permeation import get_oxide_properties_at_T, get_metal_properties_at_T
 from calculations.parallel_oxide_defect_paths import (calculate_parallel_path_flux,
@@ -24,7 +24,7 @@ from calculations.wall_labels import (DOMINANCE, SURFACE_OF, compose, defect_fra
                                       model1_step, model2_paths, parse)
 
 SIM = build_simulation_config()
-MICRO_M1 = dict(microstructure_params=MICROSTRUCTURE, lattice_density=MICROSTRUCTURE['N_L'], mode='both')
+MICRO_M1 = dict(microstructure_params=MICROSTRUCTURE, enable_gb_enhancement=MODEL_OPTIONS['enable_gb_enhancement'])
 
 # The operating point, and the low-pressure end where the oxide (Model 1) or the surface
 # (Model 2) holds hydrogen back, so both kinds of label are exercised.
@@ -46,33 +46,31 @@ def model2_wall(level, T, P, defects):
         return calculate_mixed_defect_flux_L6(*args, p['k_diss'], p['K_eq'], p['D_ox'], p['K_ox'], SIM['L_oxide'],
                                               p['D_m'], p['K_s_m'], defects, **kin)
     return calculate_full_model_flux_L346_v2(*args, T, p['k_diss'], p['K_eq'], p['D_ox'], p['K_ox'], SIM['L_oxide'],
-                                             p['D_m'], p['K_s_m'], SIM['microstructure'], defects, mode='both', **kin)
+                                             p['D_m'], p['K_s_m'], SIM['microstructure'], defects, **kin)
 
 
 @pytest.mark.parametrize('regime,expected', [
-    ('oxide_limited',                      ('oxide diffusion', '')),
-    ('oxide_limited/defect_limited',       ('oxide diffusion', '')),
-    ('metal_limited',                      ('metal diffusion', '')),
-    ('metal_limited/lattice_limited',      ('metal diffusion', 'lattice')),
-    ('metal_limited/traps_defect_limited', ('metal diffusion', 'traps')),
-    ('transition',                         ('mixed', '')),
+    ('oxide_limited',                'oxide diffusion'),
+    ('oxide_limited/defect_limited', 'oxide diffusion'),
+    ('metal_limited',                'metal diffusion'),
+    ('transition',                   'mixed'),
 ])
 def test_model1_step_names_the_solver_label(regime, expected):
     assert model1_step(regime) == expected
 
 
-@pytest.mark.parametrize('step,detail,path', [('oxide surface', '', None), ('metal diffusion', 'traps', 'pinhole'),
-                                              ('mixed', '', 'intact'), ('oxide diffusion', '', 'grain_boundary')])
-def test_compose_and_parse_are_inverses(step, detail, path):
+@pytest.mark.parametrize('step,path', [('oxide surface', None), ('metal diffusion', 'pinhole'),
+                                       ('mixed', 'intact'), ('oxide diffusion', 'grain_boundary')])
+def test_compose_and_parse_are_inverses(step, path):
     from calculations.wall_labels import PATH_NAMES
-    assert parse(compose(step, detail, path)) == ((PATH_NAMES[path] if path else None), step, detail)
+    assert parse(compose(step, path)) == ((PATH_NAMES[path] if path else None), step)
 
 
 def test_a_path_dominates_only_above_half_the_flux():
     """At exactly half neither path dominates; a hair above, the larger one does."""
     def paths(share):
-        return {'intact':  {'contribution': 1 - share, 'step': 'oxide diffusion', 'detail': ''},
-                'pinhole': {'contribution': share,     'step': 'metal surface',   'detail': ''}}
+        return {'intact':  {'contribution': 1 - share, 'step': 'oxide diffusion'},
+                'pinhole': {'contribution': share,     'step': 'metal surface'}}
     assert label_from_paths(paths(DOMINANCE), 1.0) == 'mixed'
     assert label_from_paths(paths(DOMINANCE + 1e-9), 1.0) == 'pinholes/metal surface'
     assert label_from_paths(paths(DOMINANCE - 1e-9), 1.0) == 'intact/oxide diffusion'
@@ -138,7 +136,6 @@ def test_drawing_marks_defect_paths_hollow_and_mixed_unfitted():
     assert describe('pinholes/metal surface')[3] == 'hollow'
     assert describe('intact/oxide surface')[3] == 'filled'
     assert describe('oxide surface')[3] == 'filled'
-    assert describe('intact/metal diffusion/traps')[2] == 'D'
     assert describe('pinholes/metal surface')[1] != describe('intact/oxide surface')[1]
     assert not fitted('mixed') and not fitted('intact/mixed') and not fitted('undefined')
     assert fitted('cracks/oxide diffusion')
