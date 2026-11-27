@@ -1014,9 +1014,9 @@ STUDY_STAMP_FILE = 'study.txt'
 
 #: Bumped whenever a change makes saved scans incomparable with new ones, and
 #: written into the stamp file beside them, so a notebook cache can refuse a scan
-#: drawn under an older design instead of silently reusing it.
-#:   2 -- log-uniform sampling, rate-control regime fractions, fixed interface
-#:        solve (2026-11-26). Unversioned scans are treated as version 1.
+#: drawn under an older design instead of silently reusing it. Version 2
+#: (2026-11-26): log-uniform sampling, rate-control regime fractions, fixed
+#: interface solve. Unversioned scans are treated as version 1.
 SCAN_VERSION = 2
 
 
