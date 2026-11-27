@@ -127,7 +127,7 @@ The two floors behave differently with cluster size. On a synthetic test δ's fl
 went 0.13, 0.08, 0.08, 0.07 at n = 500, 1500, 3000, 6000 — its kernel-density bias
 does not shrink — while PAWN's went 0.13, 0.075, 0.05, 0.036, roughly as $1/\sqrt{n}$.
 So δ cannot resolve an effect much below 0.07 however large the cluster, and at the
-5000-row clusters now used PAWN is the more discriminating of the two.
+5000-row clusters used here PAWN is the more discriminating of the two.
 
 ### Below the floor does not mean "no physical effect"
 
