@@ -152,6 +152,8 @@ def main(out):
                 continue                                       # no oxide defects in this level
             with contextlib.redirect_stdout(io.StringIO()):
                 flux, wall = solve(level, T, P, Lox, Lm, f)
+            if wall['label'] == 'undefined':
+                flux = np.nan                                  # a failed or incomplete wall carries no flux
             rows.append(dict(**META, level=level, sweep=sweep,
                              T=T, P=P, P_down=P_down, L_ox=Lox, L_m=Lm,
                              L_total=Lox * ('oxide' in layers) + Lm * ('metal' in layers),
