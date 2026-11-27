@@ -12,11 +12,14 @@ from calculations.interface_solver import calculate_oxide_metal_system
 
 
 def exact(P_up, P_down, ox, m):
+    """Root of the quadratic in u = sqrt(P_int) - sqrt(P_down), the variable
+    that keeps J = b u free of cancellation."""
     a = ox['D_ox'] * ox['K_ox'] / ox['thickness']
     b = m['D_metal'] * m['K_s_metal'] / m['thickness']
-    c = a * P_up + b * np.sqrt(P_down)
-    s = 2 * c / (b + np.sqrt(b * b + 4 * a * c))
-    return s * s, b * (s - np.sqrt(P_down))
+    sd = np.sqrt(P_down)
+    beta = b + 2 * a * sd
+    u = 2 * a * (P_up - P_down) / (beta + np.sqrt(beta ** 2 + 4 * a * a * (P_up - P_down)))
+    return (sd + u) ** 2, b * u
 
 
 CASES = {
@@ -29,6 +32,10 @@ CASES = {
     # oxide so tight that P_int < 1e-10 P_up: root below the bracket
     'oxide-dominated': (1e-5, 0.0, {'D_ox': 1e-22, 'K_ox': 1e-3, 'thickness': 1e-5},
                         {'D_metal': 1e-8, 'K_s_metal': 0.05, 'thickness': 1e-4}),
+    # oxide-dominated with P_down > 0: P_int is next to P_down, so
+    # b*(sqrt(P_int) - sqrt(P_down)) would cancel to 0 (PR #2 review)
+    'oxide-dominated, P_down > 0': (1e-5, 1e-6, {'D_ox': 1e-20, 'K_ox': 1.0, 'thickness': 1.0},
+                                    {'D_metal': 5e-6, 'K_s_metal': 1.0, 'thickness': 1.0}),
     'ordinary': (1e5, 10.0, {'D_ox': 1e-17, 'K_ox': 287.0, 'thickness': 1e-6},
                  {'D_metal': 2e-10, 'K_s_metal': 0.058, 'thickness': 1e-3}),
 }
@@ -39,8 +46,8 @@ def test_interface_matches_exact_root(case):
     P_up, P_down, ox, m = CASES[case]
     r = calculate_oxide_metal_system(P_up, P_down, ox, m)
     P_int, J = exact(P_up, P_down, ox, m)
-    assert r['P_interface'] == pytest.approx(P_int, rel=1e-6)
-    assert r['flux'] == pytest.approx(J, rel=1e-6)
+    assert r['P_interface'] == pytest.approx(P_int, rel=1e-6, abs=0)
+    assert r['flux'] == pytest.approx(J, rel=1e-6, abs=0)
 
 
 def test_random_walls_across_sa_ranges():
@@ -54,4 +61,4 @@ def test_random_walls_across_sa_ranges():
         P = 10 ** rng.uniform(-7, 7)
         r = calculate_oxide_metal_system(P, 0.0, ox, m)
         _, J = exact(P, 0.0, ox, m)
-        assert r['flux'] == pytest.approx(J, rel=1e-3)
+        assert r['flux'] == pytest.approx(J, rel=1e-3, abs=0)

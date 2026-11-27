@@ -96,26 +96,33 @@ def flux_balance_equation(P_interface, P_upstream, P_downstream, oxide_props, me
 # Handle edge case where upstream pressure is too low
 min_pressure = 1e-20  # Minimum meaningful pressure
 def _interface_closed_form(P_upstream, P_downstream, oxide_props, metal_props):
-    r"""Exact oxide/metal interface pressure (Henry oxide, Sieverts metal).
+    r"""Exact oxide/metal interface pressure and flux (Henry oxide, Sieverts metal).
 
     With :math:`a = D_{ox}K_{ox}/L_{ox}`, :math:`b = D_mK_s/L_m` and
-    :math:`s = \sqrt{P_{int}}`, the flux balance
-    :math:`a(P_{up} - s^2) = b(s - \sqrt{P_{down}})` is a quadratic in s, whose
-    positive root is written in the cancellation-free form
+    :math:`u = \sqrt{P_{int}} - \sqrt{P_{down}}`, the flux balance
+    :math:`a(P_{up} - P_{int}) = b\,u` is a quadratic in u,
+    :math:`a u^2 + \beta u - a\Delta P = 0` with :math:`\beta = b + 2a\sqrt{P_{down}}`
+    and :math:`\Delta P = P_{up} - P_{down}`, whose positive root is written in the
+    cancellation-free form
 
     .. math::
 
-        s = \frac{2c}{b + \sqrt{b^2 + 4ac}},\qquad c = aP_{up} + b\sqrt{P_{down}}
+        u = \frac{2a\Delta P}{\beta + \sqrt{\beta^2 + 4a^2\Delta P}}
+
+    Solving for u rather than :math:`\sqrt{P_{int}}` keeps the flux :math:`J = b\,u`
+    accurate when the interface sits next to P_downstream (oxide-dominated), where
+    :math:`\sqrt{P_{int}} - \sqrt{P_{down}}` would cancel.
 
     Used where brentq cannot bracket, i.e. when the root lies within 1e-10 of
-    P_downstream or P_upstream.
+    P_downstream or P_upstream. Returns ``(P_interface, flux)``.
     """
     a = oxide_props['D_ox'] * oxide_props['K_ox'] / oxide_props['thickness']
     b = metal_props['D_metal'] * metal_props['K_s_metal'] / metal_props['thickness']
     s_d = np.sqrt(max(P_downstream, 0.0))
-    c = a * P_upstream + b * s_d
-    s = 2.0 * c / (b + np.sqrt(b * b + 4.0 * a * c))
-    return float(s * s)
+    dP = P_upstream - max(P_downstream, 0.0)
+    beta = b + 2.0 * a * s_d
+    u = 2.0 * a * dP / (beta + np.sqrt(beta * beta + 4.0 * a * a * dP))
+    return float((s_d + u) ** 2), float(b * u)
 
 
 def solve_interface_pressure(P_upstream, P_downstream, oxide_props, metal_props, method='brentq'):
@@ -193,8 +200,8 @@ def solve_interface_pressure(P_upstream, P_downstream, oxide_props, metal_props,
             # physical limit, outside the bracket. The root may be at either limit
             # (oxide-dominated: near P_downstream; metal-dominated: near
             # P_upstream), so take the exact root; see _interface_closed_form.
-            P_interface = _interface_closed_form(P_upstream, P_downstream,
-                                                 oxide_props, metal_props)
+            P_interface, flux_fallback = _interface_closed_form(
+                P_upstream, P_downstream, oxide_props, metal_props)
             converged = False
             fallback = True
         else:
@@ -226,18 +233,16 @@ def solve_interface_pressure(P_upstream, P_downstream, oxide_props, metal_props,
                 raise ValueError(f"Unknown method: {method}")
             
     except (ValueError, RuntimeError) as e:
-        P_interface = _interface_closed_form(P_upstream, P_downstream,
-                                             oxide_props, metal_props)
+        P_interface, flux_fallback = _interface_closed_form(
+            P_upstream, P_downstream, oxide_props, metal_props)
         converged = False
         fallback = True
     
     # Calculate actual flux at solution. On the fallback the interface sits within
-    # 1e-10 of a limit, where P_upstream - P_interface is a difference of nearly
-    # equal numbers; the metal flux has no such cancellation, so use it there.
+    # 1e-10 of a limit, where either pressure difference is a difference of nearly
+    # equal numbers, so use the flux the closed form computes without one.
     if fallback:
-        flux = calculate_metal_flux_sieverts(
-            metal_props['D_metal'], metal_props['K_s_metal'], metal_props['thickness'],
-            P_interface, P_downstream)
+        flux = flux_fallback
     else:
         flux = molecular_diffusion_flux(
             oxide_props['D_ox'],
