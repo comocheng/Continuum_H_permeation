@@ -1,0 +1,15 @@
+# Repository git settings that git will not apply on its own.
+#
+# Git never runs a command named in a repository's own files, so a clone does not pick these up
+# by itself. Enable them once per clone, from the repository root:
+#
+#     git config --local include.path ../.gitconfig
+#
+# (The path is relative to .git/config.) Later changes to this file then apply automatically.
+
+# Commit the notebooks that .gitattributes marks filter=strip-outputs without their outputs;
+# the working copies keep them. required = true makes `git add` fail, rather than silently commit
+# the outputs, if the filter cannot run.
+[filter "strip-outputs"]
+	clean = python tools/strip_notebook_outputs.py
+	required = true
