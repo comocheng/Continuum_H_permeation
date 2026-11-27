@@ -12,8 +12,9 @@ study-comparison.ipynb launches one of these per study and overlays the results.
 material properties, operating point, ranges, wall, microstructure, defects -- comes from the
 study's own config, even where the studies currently agree, so editing one config changes only that
 study's curves. The CSV holds the flux and regime label of every point, plus what the study was run
-with; Φ_app is derived from the flux in the notebook. Labels come from calculations.wall_labels, the
-same module the sweep notebooks use.
+with; Φ_app is derived from the flux in the notebook. Labels, and the whole-wall degrees of rate
+control (X_* columns) they are read from, come from calculations.wall_labels, the same module the
+sweep notebooks use.
 """
 import contextlib
 import hashlib
@@ -42,7 +43,7 @@ from calculations.surface_kinetics import (get_all_properties, solve_steady_stat
                                            solve_steady_state_flux_L2aL6, solve_steady_state_flux_direct,
                                            calculate_mixed_defect_flux_L6, calculate_defective_metal_flux_L6,
                                            calculate_full_model_flux_L346_v2)
-from calculations.wall_labels import label_model1, label_model2
+from calculations.wall_labels import X_KEYS, wall_model1, wall_model2
 
 SIM    = build_simulation_config()
 T_op, P_up, P_down = CONDITIONS['T_operating'], CONDITIONS['P_upstream'], SIM['P_downstream']
@@ -80,25 +81,25 @@ def props_at(T):
 
 
 def model1(level, T, P, Lox, Lm, f=None):
-    """Flux and label; ``f`` replaces the study's defects with pinholes alone at that area fraction."""
+    """Flux and wall record (label and X); ``f`` replaces the study's defects with pinholes alone at that area fraction."""
     p = props_at(T)
     ox, me = dict(p['ox'], thickness=Lox), dict(p['me'], thickness=Lm)
     D, K  = me['D_metal'], me['K_s_metal']
     micro = dict(microstructure_params=MICROSTRUCTURE, enable_gb_enhancement=MODEL_OPTIONS['enable_gb_enhancement'])
     # the single-type branch for pinholes alone, never 'mixed', which would re-weight rather than add area
     defects = OXIDE_DEFECTS if f is None else {'type': 'pinhole', 'area_fraction': f}
-    if level == 'L1':  return calculate_simple_metal_flux(D, K, Lm, P, P_down)['flux'], label_model1('L1')
-    if level == 'L2a': return molecular_diffusion_flux(ox['D_ox'], ox['K_ox'], Lox, P, P_down), label_model1('L2a')
+    if level == 'L1':  return calculate_simple_metal_flux(D, K, Lm, P, P_down)['flux'], wall_model1('L1')
+    if level == 'L2a': return molecular_diffusion_flux(ox['D_ox'], ox['K_ox'], Lox, P, P_down), wall_model1('L2a')
     if level == 'L2b': r = calculate_oxide_metal_system(P, P_down, ox, me)
     if level == 'L3':  r = calculate_parallel_path_flux(P, P_down, ox, me, defects)
     if level == 'L4':  r = calculate_defective_metal_flux(D_lattice=D, K_s=K, metal_thickness=Lm, P_up=P,
                                                           P_down=P_down, temperature=T, **micro)
     if level == 'L5':  r = calculate_parallel_path_flux_defective_metal(P, P_down, ox, me, defects, T, **micro)
-    return r.get('flux_total', r.get('flux')), label_model1(level, r, P, P_down, ox, me, defects, T, micro)
+    return r.get('flux_total', r.get('flux')), wall_model1(level, r, P, P_down, ox, me, defects, T, micro)
 
 
 def model2(level, T, P, Lox, Lm, f=None):
-    """Flux and label, exactly as in the sweep notebooks; ``f`` as in model1()."""
+    """Flux and wall record, labelled exactly as in the sweep notebooks; ``f`` as in model1()."""
     p, micro = props_at(T), SIM['microstructure']
     defects  = SIM['defect_config'] if f is None else {'pinhole': {'area_fraction': f}}
     k, Keq, Dox, Kox, Dm, Ksm = (p['m2'][key] for key in ('k_diss', 'K_eq', 'D_ox', 'K_ox', 'D_m', 'K_s_m'))
@@ -115,7 +116,7 @@ def model2(level, T, P, Lox, Lm, f=None):
                                                                microstructure_params=micro, enable_gb_enhancement=gb)
     if level == 'L5L6':  r = calculate_full_model_flux_L346_v2(P, P_down, Lm, T, k, Keq, Dox, Kox, Lox, Dm, Ksm,
                                                                micro, defects, enable_gb_enhancement=gb, **pin)
-    return r.get('J_total', r.get('J_ss', r.get('flux'))), label_model2(level, r, defects)
+    return r.get('J_total', r.get('J_ss', r.get('flux'))), wall_model2(level, r, defects)
 
 
 def points():
@@ -150,11 +151,12 @@ def main(out):
             if sweep == 'pinholes' and level not in PINHOLE_LEVELS:
                 continue                                       # no oxide defects in this level
             with contextlib.redirect_stdout(io.StringIO()):
-                flux, regime = solve(level, T, P, Lox, Lm, f)
+                flux, wall = solve(level, T, P, Lox, Lm, f)
             rows.append(dict(**META, level=level, sweep=sweep,
                              T=T, P=P, P_down=P_down, L_ox=Lox, L_m=Lm,
                              L_total=Lox * ('oxide' in layers) + Lm * ('metal' in layers),
-                             f=np.nan if f is None else f, flux=flux, regime=regime))
+                             f=np.nan if f is None else f, flux=flux, regime=wall['label'],
+                             **{key: wall[key] for key in X_KEYS.values()}))
         print(f'{STUDY_NAME}: {level} done', flush=True)
     tmp = f'{out}.part'
     pd.DataFrame(rows).to_csv(tmp, index=False)
