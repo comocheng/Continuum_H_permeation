@@ -1109,6 +1109,20 @@ def _save_scan(df, path, complete=True):
 PARALLEL_MIN_DRAWS = 2000
 
 
+def _reaches_workers(fn):
+    """True if spawn-started workers can receive ``fn``: it pickles, by reference,
+    from a module they can import. A function defined in a notebook or script
+    lives in ``__main__``, which pickles in the parent but not in a worker."""
+    import pickle
+    if getattr(fn, '__module__', None) in (None, '__main__', '__mp_main__'):
+        return False
+    try:
+        pickle.dumps(fn)
+    except Exception:
+        return False
+    return True
+
+
 def default_n_jobs():
     """Worker count: $PERMEATION_N_JOBS if set, else every CPU."""
     env = os.environ.get('PERMEATION_N_JOBS', '').strip()
@@ -1252,6 +1266,14 @@ def run_global_lhs_scan(param_ranges, N, seed=42, wrapper=None,
         print(f"{'='*70}")
 
     n_jobs = default_n_jobs() if n_jobs is None else max(1, int(n_jobs))
+    if n_jobs > 1 and n >= PARALLEL_MIN_DRAWS and not _reaches_workers(wrapper):
+        import warnings
+        warnings.warn(f"wrapper {getattr(wrapper, '__qualname__', wrapper)!r} cannot be "
+                      f"sent to worker processes (a lambda, nested function, or one "
+                      f"defined in a notebook or __main__); scanning serially. Define it "
+                      f"at the top level of an importable module to run in parallel.",
+                      RuntimeWarning, stacklevel=2)
+        n_jobs = 1
     args = (wrapper, names)
     tail = (fixed_params, output_fields, label_fields)
     if n_jobs == 1 or n < PARALLEL_MIN_DRAWS:

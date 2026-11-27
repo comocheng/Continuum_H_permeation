@@ -133,3 +133,14 @@ def test_failed_scan_write_leaves_the_stamp_incomplete(tmp_path, monkeypatch):
         _save_scan(pd.DataFrame({'a': [1]}), str(tmp_path / 'scan_x.csv'))
     assert scan_version(str(tmp_path)) == 0
 
+
+def test_wrapper_workers_cannot_import_runs_serially():
+    """A lambda can't reach spawn workers; the scan warns and runs serially
+    instead of failing only once it is large enough to go parallel."""
+    from calculations.sensitivity import PARALLEL_MIN_DRAWS
+    wrapper = lambda p, return_full_record=False: {'flux': p['x'], 'regime': 'metal'}
+    with pytest.warns(RuntimeWarning, match="scanning serially"):
+        df, _ = run_global_lhs_scan({'x': [1.0, 2.0]}, PARALLEL_MIN_DRAWS, n_jobs=2,
+                                    wrapper=wrapper, output_fields=['flux'],
+                                    label_fields=['regime'], verbose=False)
+    assert len(df) == PARALLEL_MIN_DRAWS and df['flux'].notna().all()
