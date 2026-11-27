@@ -1,0 +1,106 @@
+# Stage 5 — Indices, and reading them
+
+## Purpose
+
+Compute PAWN and δ for every parameter inside every regime, rank them, and present the
+rankings so they can be compared across regimes without being compared across physics
+they do not share.
+
+## At a glance
+
+| | |
+|---|---|
+| **Inputs** | The regime clusters, `param_names`, `REGIME_SA_METRICS` |
+| **Outputs** | Per-regime index tables; `compare_<index>_<metric>.csv` matrices; plots |
+| **Code** | [`givendata_sensitivity_by_regime`](../api/sensitivity), `summarize_givendata`, `regime_comparison_matrix` |
+| **Cost** | δ dominates: a few minutes per (regime, metric) at 5000 rows, run in parallel across them (`n_jobs`, default every CPU or `$PERMEATION_N_JOBS`) |
+
+## Concepts
+
+**PAWN** measures the distance between the output distribution conditional on one
+parameter and the unconditional one. **δ** is Borgonovo's moment-independent importance
+measure. Neither decomposes variance, which is why both survive an output spanning ten
+decades.
+
+**The dummy parameter** is one the model never reads. Whatever index it earns is noise,
+so it defines the floor. Twenty dummies give one floor per estimator, `floor` (δ) and
+`floor_pawn` (PAWN). δ's floor stays near 0.07 at any cluster size; PAWN's falls roughly
+as $1/\sqrt{n}$, which is why the clusters target 5000 rows.
+
+**These indices are regional.** A cluster is the set of draws from one regime's preset
+that the model put in that regime. An index therefore answers "within this regime, under
+this preset, how much does the output depend on this input?" It is conditional on the
+preset ranges, so a pinned or narrowed input cannot score highly, and on a selection made
+on the output, which makes the inputs within a cluster statistically dependent although
+the LHS drew them independently. Neither PAWN nor δ is then a global index. The notebooks
+repeat the analysis on each preset's full scan (Phase 4, `routeB_presetwide.csv`), which
+removes the selection but not the preset; a parameter that ranks very differently in the
+two owes its rank to the regime selection.
+
+Metrics analysed: `flux`, `permeability`, `theta`. The first two are analysed on
+`log10`, so the density estimators are not dominated by a few huge values. `theta` is
+analysed as its logit, `log10(theta / (1 - theta))`: it is bounded in (0, 1) but spans
+about 15 decades below 0.1 in the surface-limited cluster and runs from about 1e-12 to 0.99 in
+the metal cluster. Analysed linearly, it piles into a spike at 0 narrower than the
+grid δ integrates on, and δ came out between 60 and 3000. An entry whose δ still
+leaves [0, 1] gets NaN indices and a warning.
+
+## Procedure
+
+1. Build a given-data problem from each cluster's sampled inputs.
+2. For each regime, each metric in `REGIME_SA_METRICS`, and each parameter, compute PAWN
+   and δ on the cluster.
+3. Apply the `log10` transform to the metrics in `LOG_METRICS_DEFAULT` and the logit to
+   those in `LOGIT_METRICS_DEFAULT`.
+4. Rank per regime; `summarize_givendata` assembles the tables.
+5. `regime_comparison_matrix` column-normalises into one row per parameter and one
+   column per regime, which is what the heatmap and the parallel-coordinates plot read.
+6. Plotters return their figure, or `None` for a plot they declined to draw — a skipped
+   regime, an empty matrix — so wrapping them in `save_figure` cannot turn a skipped
+   plot into a crash.
+
+## Design choices
+
+**Why two estimators rather than one.** They fail differently. Agreement between PAWN
+and δ is evidence; disagreement is a flag to look at the cluster rather than a tie to
+break.
+
+**Why the regime-defining fractions are excluded.** `frac_surface`, `frac_oxide` and
+`frac_metal` are degenerate within their own cluster, because the cluster was defined by
+them. An index for them would measure the partition.
+
+**Why `eta_surf` is not analysed by default**, despite being the sharpest surface metric
+available — $\Phi_{app} = \Phi_{transport}\,\eta_{surf}$ exactly, and
+$\Phi_{transport}$ is pressure-independent, so `eta_surf` carries the whole surface
+effect in one dimensionless number. Analysing a fourth metric costs roughly 33% more
+PAWN and δ work, and the largest cluster already runs for hours: the 773 K oxide preset
+draws over 100k samples. That is too steep a standing price for something wanted
+occasionally. It is still written to every scan CSV, so the data is there — add it to
+the list, or analyse the column directly, when a run is specifically about surface
+kinetics.
+
+**Why column normalisation in the comparison matrix.** Raw indices are not comparable
+across regimes, because the clusters differ in size and in output spread. Normalising
+per column compares *rankings*, which is the question actually being asked.
+
+## Checks and failure modes
+
+| Symptom | Meaning |
+|---|---|
+| A parameter at or below both dummy floors | Indistinguishable from no effect **in this regime, under this preset**. Not a general statement. |
+| Above the PAWN floor but not the δ floor | Expected for small effects at large n: PAWN's floor shrinks with n and δ's does not. |
+| A pinned parameter below the floor | Says nothing about its leverage — the preset removed its variance. Figure 20. |
+| PAWN and δ disagree sharply | Look at the cluster before believing either. Often a small or skewed cluster. |
+| Every parameter looks significant | The dummy floor has not been drawn. |
+| An empty or skipped plot | The plotter returned `None`; the regime was skipped or the matrix was empty. Not a crash. |
+| Indices shift between runs at the same `N` | Estimator noise. Compare against the dummy, not against the previous run. |
+| The run takes hours | It should not: scans and indices run in worker processes. Check `n_jobs` / `$PERMEATION_N_JOBS`. Results do not depend on the worker count. |
+
+---
+
+## Where to go next
+
+- The worked walkthrough, kept from the original how-to:
+  {doc}`../how-to/sensitivity-analysis`
+- Every warning in one place: {doc}`../caveats`
+- What each output column means: {doc}`../appendices` C.1

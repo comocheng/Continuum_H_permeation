@@ -72,9 +72,6 @@ KNOWN_STUDIES = {
     "Fuerst_et_al_2024": ("fuerst_etal_2024_model_config", "Hastelloy_N_fuerst_2024"),
     "incoloy802_cr2o3":  ("incoloy802_cr2o3",
                           "metal_X40_NiCrAlTi_31_19_Incoloy802_Schmidt1985"),
-    # Application holds its own copy of the 316L data and declares the same
-    # STUDY_NAME, which is what lets the container gate find its reference set.
-    "Application":       ("Guo_etal_2025_316L", "316L_Guo_2025"),
 }
 
 

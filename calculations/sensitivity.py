@@ -71,8 +71,12 @@ REGIME_SA_METRICS = ['flux', 'permeability', 'theta']
 
 # Metrics analysed on a log10 scale so the density estimators behind PAWN/delta
 # aren't dominated by a few huge values (raw flux spans ~10 decades).
-# theta (∈[0,1]) stays linear.
 LOG_METRICS_DEFAULT = ('flux', 'permeability')
+# theta is a coverage on (0, 1), but in the surface-limited cluster it spans
+# ~15 decades below 0.1 and in the metal cluster runs from ~1e-12 up to 0.99.
+# Analysed linearly, it piles up in a spike at 0 and δ came out at 60-3000,
+# impossible for an index on [0, 1]. The logit resolves both ends.
+LOGIT_METRICS_DEFAULT = ('theta',)
 
 # --- L5 (no surface kinetics) ------------------------------------------------
 SCAN_OUTPUT_FIELDS_L5 = [
@@ -294,9 +298,88 @@ def check_against_config(raise_on_fail=True, verbose=True):
                          + "\n  ".join(problems))
     return problems
 
+def _failed_record(wrapper_name, exc, full_params, return_full_record,
+                   numeric, labels):
+    """The record a wrapper returns when the model raises: NaN, not a sentinel.
+
+    Outputs are NaN so a failure can never be mistaken for a real, tiny flux
+    (a sentinel such as 1e-20 would become -20 on the log10 scale the indices
+    use), and
+    ``regime`` is 'undefined' so the row joins no cluster. ``error`` carries the
+    message; run_global_lhs_scan counts and reports these rather than letting
+    them vanish from the clusters unannounced.
+    """
+    import warnings
+    msg = f"{type(exc).__name__}: {exc}"
+    warnings.warn(f"{wrapper_name} failed: {msg}", RuntimeWarning, stacklevel=3)
+    record = {k: np.nan for k in numeric}
+    record['temperature'] = full_params.get('temperature', np.nan)
+    record['regime'] = 'undefined'
+    record['error'] = msg
+    if return_full_record:
+        for k in labels:
+            record[k] = 'error'
+    return record
+
+
 # =============================================================================
 # MODEL WRAPPER — LEVEL 5
 # =============================================================================
+
+def series_rate_control_L5(P_up, P_int, P_down=0.0):
+    r"""Oxide's degree of rate control on the Level 5 intact (oxide + metal) path.
+
+    The Level 5 oxide is Henry's-law, linear in pressure, and the metal is
+    Sieverts, linear in :math:`\sqrt{P}`:
+
+    .. math::
+
+        J = a\,(P_{up} - P_{int}) = b\,(\sqrt{P_{int}} - \sqrt{P_{down}}),
+        \qquad a = D_{ox}K_{ox}/L_{ox},\; b = D_m K_s/L_m
+
+    The fraction of the *pressure* dropped across the oxide,
+    :math:`(P_{up}-P_{int})/P_{up}`, is not the oxide's share of the resistance.
+    It compares a linear drop with a square-root one and so leans towards the
+    oxide: at :math:`P_{int} = 0.4\,P_{up}` it would call the wall 60%
+    oxide-limited, although raising the metal's permeance raises the flux more
+    than raising the oxide's.
+
+    The quantity that answers "which layer limits the flux" is the degree of rate
+    control (Campbell), :math:`X_i = \partial\ln J/\partial\ln k_i`. Scaling both
+    permeances by λ scales J by λ at fixed :math:`P_{int}`, so
+    :math:`X_{ox} + X_m = 1` exactly, and
+
+    .. math::
+
+        X_{ox} = \frac{r_{ox}}{r_{ox} + r_m},\qquad
+        r_{ox} = \frac{1}{a},\quad r_m = \frac{2\sqrt{P_{int}}}{b}
+
+    where :math:`r_m` is the metal's differential resistance in pressure,
+    :math:`dP_{int}/dJ` — the :math:`2L\sqrt{P}/(DK_s)` form, evaluated at the
+    solved interface pressure, where it is exact rather than a small-ΔP
+    approximation. Eliminating a and b with the flux balance:
+
+    .. math::
+
+        X_{ox} = \frac{P_{up} - P_{int}}
+                      {(P_{up} - P_{int}) + 2\sqrt{P_{int}}(\sqrt{P_{int}}-\sqrt{P_{down}})}
+
+    which needs only the solved pressures. With :math:`P_{down} = 0` this is
+    :math:`(P_{up}-P_{int})/(P_{up}+P_{int})`, so the layers hand over at
+    :math:`P_{int} = P_{up}/3`, not at :math:`P_{up}/2`.
+
+    Returns NaN if the pressures are not finite; 0.5 if both drops are zero.
+    """
+    if not (np.isfinite(P_up) and np.isfinite(P_int) and np.isfinite(P_down)):
+        return np.nan
+    # clip guards a solver overshoot outside [P_down, P_up]
+    p     = float(np.clip(P_int, max(P_down, 0.0), max(P_up, 0.0)))
+    s     = np.sqrt(p)
+    r_ox  = P_up - p
+    r_m   = 2.0 * s * (s - np.sqrt(max(P_down, 0.0)))
+    tot   = r_ox + r_m
+    return float(r_ox / tot) if tot > 0 else 0.5
+
 
 def level5_model_wrapper(params_dict, return_full_record=False):
     """
@@ -328,9 +411,13 @@ def level5_model_wrapper(params_dict, return_full_record=False):
 
     Note
     ----
-    'regime' holds the argmax label used to build the regime clusters. The older
-    hierarchical L3/L4 string (e.g. 'metal_limited/traps_defect_limited') moved to
-    'regime_hierarchy' so that partition_by_regime() can key on 'regime' unchanged.
+    'regime' holds the argmax label used to build the regime clusters. The
+    hierarchical Level 3 string from the solver (e.g. 'oxide_limited/defect_limited')
+    is in 'regime_hierarchy', so partition_by_regime() can key on 'regime' unchanged.
+
+    'D_eff' is the metal diffusivity the solve used (lattice, raised by
+    grain-boundary fast paths) and 'D_modification' is D_eff / D_lattice >= 1.
+    Trapping is not modelled: it does not change steady-state flux.
     """
     from calculations.parallel_oxide_defect_paths import (
         calculate_parallel_path_flux_defective_metal,
@@ -366,44 +453,16 @@ def level5_model_wrapper(params_dict, return_full_record=False):
             'thickness': full_params['metal_thickness'],
         }
 
-        # Build trap list
-        trap_list = []
-        if full_params.get('trap_dislocation_N_T', 0) > 0:
-            trap_list.append({
-                'name': 'dislocations',
-                'binding_energy': full_params['trap_dislocation_E_b'],
-                'density': full_params['trap_dislocation_N_T'],
-            })
-        if full_params.get('trap_vacancy_N_T', 0) > 0:
-            trap_list.append({
-                'name': 'vacancies',
-                'binding_energy': full_params['trap_vacancy_E_b'],
-                'density': full_params['trap_vacancy_N_T'],
-            })
-
         grain_size   = full_params['grain_size']
         gb_thickness = full_params['gb_thickness']
-        N_T_gb       = full_params.get('trap_gb_N_T', 0)
-        if full_params.get('trap_gb_E_b', 0) > 0 and N_T_gb > 0:
-            trap_list.append({
-                'name': 'grain_boundaries',
-                'binding_energy': full_params['trap_gb_E_b'],
-                'density': N_T_gb,
-            })
-        N_T_carbide = full_params.get('trap_carbide_N_T', 0)
-        if full_params.get('trap_carbide_E_b', 0) > 0 and N_T_carbide > 0:
-            trap_list.append({
-                'name': 'carbides',
-                'binding_energy': full_params['trap_carbide_E_b'],
-                'density': N_T_carbide,
-            })
 
         microstructure_params = {
             'grain_size':            grain_size,
             'grain_shape':           full_params['grain_shape'],
             'gb_type':               full_params['gb_type'],
             'gb_thickness':          gb_thickness,
-            'trap_list':             trap_list,
+            # the sampled E_D, so the GB enhancement moves with it
+            'Q_bulk':                full_params['E_D'],
         }
 
         f_pin = full_params.get('f_pinhole', 0.0)
@@ -421,21 +480,9 @@ def level5_model_wrapper(params_dict, return_full_record=False):
             'diffusivity_factor': full_params.get('gb_diffusivity_factor', 10.0),
         }
 
-        P_upstream      = full_params['P_upstream']
-        P_downstream    = full_params['P_downstream']
-        lattice_density = full_params['lattice_density']
-        method          = full_params.get('D_eff_method', 'average')
-
+        P_upstream   = full_params['P_upstream']
+        P_downstream = full_params['P_downstream']
         include_gb   = full_params.get('enable_gb_enhancement', True)
-        include_trap = full_params.get('enable_trapping', True)
-        if include_gb and include_trap:
-            mode = 'both'
-        elif include_gb:
-            mode = 'gb_only'
-        elif include_trap:
-            mode = 'trapping_only'
-        else:
-            mode = 'none'
 
         result_l5 = calculate_parallel_path_flux_defective_metal(
             P_upstream=P_upstream,
@@ -445,10 +492,7 @@ def level5_model_wrapper(params_dict, return_full_record=False):
             defect_params=defect_params,
             temperature=T,
             microstructure_params=microstructure_params,
-            lattice_density=lattice_density,
-            method=method,
-            n_profile_points=10,
-            mode=mode,
+            enable_gb_enhancement=include_gb,
         )
 
         result_bare = calculate_defective_metal_flux(
@@ -459,14 +503,14 @@ def level5_model_wrapper(params_dict, return_full_record=False):
             P_down=P_downstream,
             temperature=T,
             microstructure_params=microstructure_params,
-            lattice_density=lattice_density,
-            method=method,
-            n_profile_points=10,
-            mode=mode,
+            enable_gb_enhancement=include_gb,
         )
 
         flux_total = result_l5['flux_total']
         flux_bare  = result_bare['flux']
+        if not (np.isfinite(flux_total) and np.isfinite(flux_bare)):
+            raise FloatingPointError(
+                f"non-finite flux (total {flux_total!r}, bare metal {flux_bare!r})")
         PRF        = flux_bare / flux_total if flux_total > 0 else float('inf')
         D_eff      = result_l5.get('D_eff_metal', D_metal)
 
@@ -487,10 +531,8 @@ def level5_model_wrapper(params_dict, return_full_record=False):
 
         # --- Regime fractions -------------------------------------------------
         # Parallel axis: what share of the flux bypasses the intact oxide.
-        # Series axis: how the driving pressure splits across oxide and metal.
-        # Taken straight from the solved interface pressure, so it is exact — no
-        # linearisation of the sqrt-P metal law (calculate_metal_resistance's
-        # Taylor form is only valid for small dP, and these sweeps run P_down=0).
+        # Series axis: the degree of rate control of each layer on the intact
+        # path, d ln J / d ln (layer permeance); see series_rate_control_L5.
         # The series split is then scaled by the share of flux that actually
         # travels the series path, so all three fractions sum to 1 and the
         # parallel axis competes directly against the two series terms.
@@ -500,12 +542,11 @@ def level5_model_wrapper(params_dict, return_full_record=False):
         frac_defect = f_def / f_tot if f_tot > 0 else np.nan
 
         P_int = result_l5.get('P_interface_intact', np.nan)
-        if P_upstream > 0 and np.isfinite(P_int) and np.isfinite(frac_defect):
-            # clip guards the rare solver overshoot P_int > P_up
-            drop_ox    = float(np.clip((P_upstream - P_int) / P_upstream, 0.0, 1.0))
+        if np.isfinite(P_int) and np.isfinite(frac_defect):
+            x_ox       = series_rate_control_L5(P_upstream, P_int, P_downstream)
             series     = 1.0 - frac_defect
-            frac_oxide = drop_ox * series
-            frac_metal = (1.0 - drop_ox) * series
+            frac_oxide = x_ox * series
+            frac_metal = (1.0 - x_ox) * series
         else:
             frac_oxide = frac_metal = np.nan
 
@@ -538,22 +579,11 @@ def level5_model_wrapper(params_dict, return_full_record=False):
         return record
 
     except Exception as e:
-        print(f"Error in Level 5 model: {e}")
-        import traceback; traceback.print_exc()
-        record = {
-            'flux': 1e-20, 'PRF': 1.0, 'D_eff': 1e-12, 'D_modification': 1.0,
-            'permeability': 1e-20, 'permeance': 1e-20, 'P_interface': 0,
-            'flux_intact': 1e-20, 'flux_defect': 0, 'flux_bare_metal': 1e-20,
-            'frac_oxide': np.nan, 'frac_metal': np.nan, 'frac_defect': np.nan,
-            'regime': 'undefined',
-            'D_metal': 1e-12, 'K_s_metal': 1e-6, 'D_ox': 1e-15, 'K_ox': 1e-10,
-            'temperature': full_params.get('temperature', 1073.15),
-            'modification_factor': 1.0, 'defect_enhancement': 1.0,
-        }
-        if return_full_record:
-            record['regime_hierarchy'] = 'error'
-            record['dominant_path']    = 'error'
-        return record
+        return _failed_record(
+            'level5_model_wrapper', e, full_params, return_full_record,
+            numeric=SCAN_OUTPUT_FIELDS_L5 + ['D_metal', 'K_s_metal', 'D_ox', 'K_ox',
+                                             'modification_factor', 'defect_enhancement'],
+            labels=('regime_hierarchy', 'dominant_path'))
 
 
 # =============================================================================
@@ -741,50 +771,15 @@ def level5L6_model_wrapper(params_dict, return_full_record=False):
         # silently ignored at L5L6 while L5 applied it, leaving the two levels
         # non-comparable with nothing to signal it.
         P_down = full_params['P_downstream']
-        lattice_density = full_params['lattice_density']
-        method = full_params.get('D_eff_method', 'average')
-
-        grain_size   = full_params['grain_size']
-        gb_thickness = full_params['gb_thickness']
-        N_T_gb       = full_params.get('trap_gb_N_T', 0)
-
-        trap_list = []
-        if full_params.get('trap_dislocation_N_T', 0) > 0:
-            trap_list.append({'name': 'dislocations',
-                              'binding_energy': full_params['trap_dislocation_E_b'],
-                              'density': full_params['trap_dislocation_N_T']})
-        if full_params.get('trap_vacancy_N_T', 0) > 0:
-            trap_list.append({'name': 'vacancies',
-                              'binding_energy': full_params['trap_vacancy_E_b'],
-                              'density': full_params['trap_vacancy_N_T']})
-        if full_params.get('trap_gb_E_b', 0) > 0 and N_T_gb > 0:
-            trap_list.append({'name': 'grain_boundaries',
-                              'binding_energy': full_params['trap_gb_E_b'],
-                              'density': N_T_gb})
-        N_T_carbide = full_params.get('trap_carbide_N_T', 0)
-        if full_params.get('trap_carbide_E_b', 0) > 0 and N_T_carbide > 0:
-            trap_list.append({'name': 'carbides',
-                              'binding_energy': full_params['trap_carbide_E_b'],
-                              'density': N_T_carbide})
 
         microstructure_params = {
-            'grain_size':            grain_size,
-            'grain_shape':           full_params.get('grain_shape', 'equiaxed'),
-            'gb_type':               full_params.get('gb_type', 'LAGB'),
-            'gb_thickness':          gb_thickness,
-            'trap_list':             trap_list,
+            'grain_size':   full_params['grain_size'],
+            'grain_shape':  full_params.get('grain_shape', 'equiaxed'),
+            'gb_type':      full_params.get('gb_type', 'LAGB'),
+            'gb_thickness': full_params['gb_thickness'],
+            'Q_bulk':       full_params['E_D'],   # see level5_model_wrapper
         }
-
-        include_gb   = full_params.get('enable_gb_enhancement', True)
-        include_trap = full_params.get('enable_trapping', True)
-        if include_gb and include_trap:
-            mode = 'both'
-        elif include_gb:
-            mode = 'gb_only'
-        elif include_trap:
-            mode = 'trapping_only'
-        else:
-            mode = 'none'
+        include_gb = full_params.get('enable_gb_enhancement', True)
 
         f_pin = full_params.get('f_pinhole',   0.0)
         f_cra = full_params.get('f_crack',     0.0)
@@ -812,13 +807,20 @@ def level5L6_model_wrapper(params_dict, return_full_record=False):
             D_lattice=D_metal, K_s_m=K_s_met,
             microstructure_params=microstructure_params,
             defect_config=defect_config,
-            lattice_density=lattice_density,
-            method=method,
-            n_profile_points=10,
-            mode=mode,
+            enable_gb_enhancement=include_gb,
             k_diss_metal=k_diss_metal,
             K_eq_metal=K_eq_metal,
         )
+
+        if not np.isfinite(r['J_total']):
+            # A path whose coverage solve failed returns flux = NaN, which makes
+            # J_total NaN and every flux weight 0, and argmax over (0, 0, 0)
+            # would label the row 'surface'. Treat it as the failure it is.
+            failed = [k for k, d in r.get('defect_paths', {}).items()
+                      if not np.isfinite(d['path_result']['flux'])]
+            if not np.isfinite(r['intact_path']['flux']):
+                failed.insert(0, 'intact')
+            raise FloatingPointError(f"non-finite J_total; failed path(s): {failed}")
 
         fw           = r.get('flux_weighted_resistances', {})
         intact_theta = r.get('intact_path', {}).get('theta', np.nan)
@@ -903,24 +905,12 @@ def level5L6_model_wrapper(params_dict, return_full_record=False):
         return record
 
     except Exception as e:
-        print(f"Error in Level 5L6 model: {e}")
-        import traceback; traceback.print_exc()
-        record = {
-            'flux': 1e-20, 'PRF': np.nan, 'D_eff': 1e-12, 'D_modification': np.nan,
-            'permeability': 1e-20, 'permeance': 1e-20,
-            'Phi_transport': np.nan, 'eta_surf': np.nan, 'P_interface': np.nan,
-            'flux_intact': 1e-20, 'flux_defect': 0.0,
-            'frac_surface': np.nan, 'frac_oxide': np.nan, 'frac_metal': np.nan,
-            'theta': np.nan, 'D_metal': 1e-12, 'K_s_metal': 1e-6,
-            'D_ox': 1e-15, 'K_ox': 1e-10, 'k_diss': 1e-15, 'K_eq': 1e-10,
-            'k_diss_metal': 1e-12, 'K_eq_metal': 1e-8,
-            'temperature': full_params.get('temperature', 1073.15),
-            'regime': 'undefined',
-        }
-        if return_full_record:
-            record['system_rate_limiting'] = 'error'
-            record['dominant_path']        = 'error'
-        return record
+        return _failed_record(
+            'level5L6_model_wrapper', e, full_params, return_full_record,
+            numeric=SCAN_OUTPUT_FIELDS + ['D_modification',
+                                          'D_metal', 'K_s_metal', 'D_ox', 'K_ox',
+                                          'k_diss', 'K_eq', 'k_diss_metal', 'K_eq_metal'],
+            labels=('system_rate_limiting', 'dominant_path'))
 
 
 # =============================================================================
@@ -940,10 +930,111 @@ def _make_problem(param_ranges):
     }
 
 
+# -----------------------------------------------------------------------------
+# Sampling scale: which inputs are drawn log-uniformly
+# -----------------------------------------------------------------------------
+#: Inputs drawn uniformly in LINEAR space. These are the ones that already enter
+#: the model as an exponent -- activation energies and heats of solution inside
+#: exp(-E/RT), and temperature itself -- so equal steps in them are already equal
+#: multiplicative steps in the rate constants they control.
+#:
+#: Every other input is a positive scale quantity (a pre-exponential, a
+#: thickness, a pressure, an area fraction, a ratio, a grain size) whose range
+#: spans one to fourteen decades, and is drawn LOG-uniformly. A uniform draw over
+#: [1e-5, 0.1] puts 99.9% of the samples above 1e-4, so the bottom three decades
+#: of the range the config states would never be explored; a log-uniform draw
+#: gives each decade equal weight, which is what a range written as
+#: "1e-5 to 0.1" means.
+#:
+#: New inputs default to log-uniform, and a range that starts at or below zero is
+#: refused rather than silently linearised -- add the name here if it really
+#: belongs on a linear scale.
+LINEAR_SAMPLED_PARAMS = frozenset({
+    'temperature',
+    'E_D', 'H_s',                 # metal diffusion / solution
+    'E_D_ox', 'H_sol_ox',         # oxide diffusion / solution
+    'E_diss', 'H_eq',             # oxide surface kinetics
+    'E_diss_metal', 'H_eq_metal', # metal surface kinetics
+})
+
+
+def sampling_scales(param_ranges, linear_params=LINEAR_SAMPLED_PARAMS):
+    """``{name: 'log' | 'linear'}`` for every parameter in ``param_ranges``.
+
+    Raises
+    ------
+    ValueError
+        If a parameter that would be sampled log-uniformly has a lower bound
+        at or below zero.
+    """
+    scales = {}
+    for name, (lo, hi) in param_ranges.items():
+        if name in linear_params:
+            scales[name] = 'linear'
+            continue
+        if not (lo > 0 and hi > 0):
+            raise ValueError(
+                f"{name!r} range [{lo:g}, {hi:g}] cannot be sampled log-uniformly; "
+                f"add it to LINEAR_SAMPLED_PARAMS if it belongs on a linear scale")
+        scales[name] = 'log'
+    return scales
+
+
+def lhs_sample(param_ranges, N, seed=42, linear_params=LINEAR_SAMPLED_PARAMS):
+    """Latin hypercube over ``param_ranges``, log-uniform where appropriate.
+
+    The hypercube is laid out in the space each input is sampled in --
+    log10 for scale quantities, linear for energies and temperature (see
+    LINEAR_SAMPLED_PARAMS) -- and mapped back, so every returned value is in
+    physical units and lies within its stated range.
+
+    Returns
+    -------
+    X : ndarray, shape (N, D)
+        Physical parameter values, columns in ``param_ranges`` order.
+    scales : dict
+        ``{name: 'log' | 'linear'}``, as from :func:`sampling_scales`.
+    """
+    scales = sampling_scales(param_ranges, linear_params)
+    names  = list(param_ranges)
+    bounds = [[np.log10(lo), np.log10(hi)] if scales[n] == 'log' else [lo, hi]
+              for n, (lo, hi) in param_ranges.items()]
+    Z = latin_sampler.sample({'num_vars': len(names), 'names': names,
+                              'bounds': bounds}, N, seed=seed)
+    X = Z.copy()
+    for j, n in enumerate(names):
+        if scales[n] == 'log':
+            lo, hi = param_ranges[n]
+            # clip: 10**log10(x) can land one ulp outside [lo, hi]
+            X[:, j] = np.clip(10.0 ** Z[:, j], lo, hi)
+    return X, scales
+
+
 STUDY_STAMP_FILE = 'study.txt'
 
+#: Bumped whenever a change makes saved scans incomparable with new ones, and
+#: written into the stamp file beside them, so a notebook cache can refuse a scan
+#: drawn under an older design instead of silently reusing it. Version 2
+#: (2026-11-26): log-uniform sampling, rate-control regime fractions, fixed
+#: interface solve. Unversioned scans are treated as version 1.
+SCAN_VERSION = 2
 
-def _stamp_study(directory):
+
+def scan_version(directory):
+    """SCAN_VERSION recorded beside the scans in ``directory`` (1 if none)."""
+    stamp = os.path.join(directory or '.', STUDY_STAMP_FILE)
+    if not os.path.isfile(stamp):
+        return None
+    with open(stamp) as fh:
+        for line in fh:
+            if line.startswith('scan_version:'):
+                v = line.split(':', 1)[1].strip()
+                # 'incomplete': a batch of scans was interrupted part-way
+                return int(v) if v.isdigit() else 0
+    return 1
+
+
+def _stamp_study(directory, complete=True):
     """Record which study produced the files in ``directory``, and shout if it changed.
 
     The scan CSVs carry no study identifier, so a results folder copied from another
@@ -951,6 +1042,10 @@ def _stamp_study(directory):
     another folder's study — is indistinguishable from a fresh run of this one. It writes the
     active study beside the results and warns when a directory that already held one
     study's output starts receiving another's.
+
+    ``complete=False`` records the scan version as 'incomplete' (read back as 0 by
+    scan_version), for a directory part-way through a batch of scans: until the
+    last one is written, files from an older design may sit beside the new ones.
     """
     from calculations.config.model_config import (
         ACTIVE_STUDY_NAME, ACTIVE_STUDY_PATH, ACTIVE_STUDY_SOURCE,
@@ -973,23 +1068,125 @@ def _stamp_study(directory):
     with open(stamp, 'w') as fh:
         fh.write(f"study:  {ACTIVE_STUDY_NAME}\n"
                  f"path:   {ACTIVE_STUDY_PATH}\n"
-                 f"source: {ACTIVE_STUDY_SOURCE}\n")
+                 f"source: {ACTIVE_STUDY_SOURCE}\n"
+                 f"scan_version: {SCAN_VERSION if complete else 'incomplete'}\n")
 
 
-def _save_scan(df, path):
-    """Persist the scan DataFrame; parquet if requested+available, else CSV."""
+def _save_scan(df, path, complete=True):
+    """Persist the scan DataFrame; parquet if requested+available, else CSV.
+
+    ``complete`` is passed to _stamp_study: False while more scans of the same
+    batch are still to be written to this directory.
+    """
     path = str(path)
-    _stamp_study(os.path.dirname(path))
+    directory = os.path.dirname(path)
+    # Incomplete while the file is being written; the requested state only once
+    # the write has succeeded, so a failed write never sits beside a current stamp.
+    _stamp_study(directory, complete=False)
     if path.endswith('.parquet'):
         try:
             df.to_parquet(path)
-            print(f"  saved scan -> {path}")
-            return
         except Exception as e:
             print(f"  parquet save failed ({e}); falling back to CSV")
             path = path.rsplit('.', 1)[0] + '.csv'
-    df.to_csv(path, index=False)
+    if not path.endswith('.parquet'):
+        df.to_csv(path, index=False)
+    _stamp_study(directory, complete=complete)
     print(f"  saved scan -> {path}")
+
+
+# -----------------------------------------------------------------------------
+# Parallel execution
+# -----------------------------------------------------------------------------
+# Both expensive stages are embarrassingly parallel: each model evaluation is
+# independent, and each (regime, metric) index is one self-contained SALib call
+# that seeds its own random state. Farming them out changes no number -- the
+# results are identical to a serial run (tests/test_sa_parallel.py) -- only the
+# wall time. Workers are started with 'spawn' on every platform, so a notebook
+# kernel never forks with matplotlib or threads live.
+
+#: Below this many draws a scan runs serially: starting workers costs ~1-2 s each.
+PARALLEL_MIN_DRAWS = 2000
+
+
+def _reaches_workers(fn):
+    """True if spawn-started workers can receive ``fn``: it pickles, by reference,
+    from a module they can import. A function defined in a notebook or script
+    lives in ``__main__``, which pickles in the parent but not in a worker."""
+    import pickle
+    if getattr(fn, '__module__', None) in (None, '__main__', '__mp_main__'):
+        return False
+    try:
+        pickle.dumps(fn)
+    except Exception:
+        return False
+    return True
+
+
+def default_n_jobs():
+    """Worker count: $PERMEATION_N_JOBS if set, else every CPU."""
+    env = os.environ.get('PERMEATION_N_JOBS', '').strip()
+    return max(1, int(env)) if env else (os.cpu_count() or 1)
+
+
+class _worker_pool:
+    """ProcessPoolExecutor whose workers load the SAME study as this process.
+
+    A spawned worker imports calculations afresh, and model_config resolves its
+    study at import -- from $PERMEATION_STUDY, else the working directory. Both
+    usually agree with the parent, but a notebook that set neither and changed
+    directory would load a different study, or none. So the parent's resolved
+    study is pinned in the environment the workers inherit, for the pool's
+    lifetime only. Workers also run quiet: no study banner, no warnings (a
+    failed evaluation is still reported, through the scan's 'error' column).
+    """
+
+    def __init__(self, n_jobs):
+        self.n_jobs = n_jobs
+
+    def __enter__(self):
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor
+        from calculations.config.model_config import ACTIVE_STUDY_PATH
+        self._saved = {k: os.environ.get(k) for k in
+                       ('PERMEATION_STUDY', 'PERMEATION_STUDY_QUIET', 'PYTHONWARNINGS')}
+        os.environ['PERMEATION_STUDY'] = str(ACTIVE_STUDY_PATH)
+        os.environ['PERMEATION_STUDY_QUIET'] = '1'
+        os.environ['PYTHONWARNINGS'] = 'ignore'
+        self._pool = ProcessPoolExecutor(self.n_jobs,
+                                         mp_context=mp.get_context('spawn'))
+        return self._pool
+
+    def __exit__(self, *exc):
+        try:
+            self._pool.shutdown(wait=True, cancel_futures=True)
+        finally:
+            for k, v in self._saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        return False
+
+
+def _evaluate_rows(wrapper, names, X, fixed_params, output_fields, label_fields):
+    """Evaluate the wrapper on rows of X; the unit of work for run_global_lhs_scan."""
+    rows = []
+    for x in X:
+        params = dict(zip(names, x))
+        rec    = wrapper({**params, **fixed_params}, return_full_record=True)
+        row    = dict(params)  # ONLY the sampled values are SA inputs
+        # fixed values are recorded for provenance but must stay out of the SA
+        # parameter list — a constant column has zero variance, which PAWN and
+        # delta cannot condition on.
+        row.update(fixed_params)
+        for f in output_fields:
+            row[f] = rec.get(f, np.nan)
+        for f in label_fields:
+            row[f] = rec.get(f, 'undefined')
+        row['error'] = rec.get('error', '')
+        rows.append(row)
+    return rows
 
 
 # -----------------------------------------------------------------------------
@@ -998,7 +1195,8 @@ def _save_scan(df, path):
 
 def run_global_lhs_scan(param_ranges, N, seed=42, wrapper=None,
                         output_fields=None, label_fields=None,
-                        fixed_params=None, save_path=None, verbose=True):
+                        fixed_params=None, save_path=None, verbose=True,
+                        n_jobs=None):
     """
     Space-filling LHS over all parameters, evaluated once with the full record.
 
@@ -1020,6 +1218,10 @@ def run_global_lhs_scan(param_ranges, N, seed=42, wrapper=None,
         return_full_record=True.
     save_path : str or None
         If given, persist the tidy DataFrame (CSV, or parquet by extension).
+    n_jobs : int or None
+        Worker processes for the model evaluations; None means default_n_jobs().
+        Scans smaller than PARALLEL_MIN_DRAWS run serially. The result does not
+        depend on n_jobs.
 
     Returns
     -------
@@ -1027,7 +1229,15 @@ def run_global_lhs_scan(param_ranges, N, seed=42, wrapper=None,
         df : tidy DataFrame — one row per LHS draw; columns = sampled parameter
              values (the SA inputs X) + SCAN_OUTPUT_FIELDS + SCAN_LABEL_FIELDS.
 
-        problem : SALib problem dict (names/bounds) for reuse downstream.
+        problem : SALib problem dict (names/bounds) for reuse downstream, plus
+             'scales' = {name: 'log' | 'linear'}.
+
+    Notes
+    -----
+    Scale parameters are drawn log-uniformly and energies/temperature uniformly
+    (see LINEAR_SAMPLED_PARAMS and lhs_sample). PAWN and delta both condition
+    on ranks of X, so the given-data indices need no matching transform; the
+    choice of scale matters only for WHERE the samples fall.
     """
     if wrapper is None:
         wrapper = level5L6_model_wrapper
@@ -1044,32 +1254,59 @@ def run_global_lhs_scan(param_ranges, N, seed=42, wrapper=None,
 
     problem = _make_problem(param_ranges)
     names   = problem['names']
-    X       = latin_sampler.sample(problem, N, seed=seed)
+    X, scales = lhs_sample(param_ranges, N, seed=seed)
+    problem['scales'] = scales
     n       = X.shape[0]
 
     if verbose:
+        n_log = sum(s == 'log' for s in scales.values())
         print(f"\n{'='*70}")
-        print(f"GLOBAL LHS SCAN — {n} samples × {len(names)} params (seed={seed})")
+        print(f"GLOBAL LHS SCAN — {n} samples × {len(names)} params (seed={seed}; "
+              f"{n_log} log-uniform, {len(names) - n_log} linear)")
         print(f"{'='*70}")
 
-    rows = []
-    for i in range(n):
-        params = dict(zip(names, X[i]))
-        rec    = wrapper({**params, **fixed_params}, return_full_record=True)
-        row    = dict(params)  # ONLY the sampled values are SA inputs
-        # fixed values are recorded for provenance but must stay out of the SA
-        # parameter list — a constant column has zero variance, which PAWN and
-        # delta cannot condition on.
-        row.update(fixed_params)
-        for f in output_fields:
-            row[f] = rec.get(f, np.nan)
-        for f in label_fields:
-            row[f] = rec.get(f, 'undefined')
-        rows.append(row)
-        if verbose and ((i + 1) % max(1, n // 10) == 0 or (i + 1) == n):
-            print(f"  scan {i + 1}/{n} ({(i + 1) / n * 100:.0f}%)")
+    n_jobs = default_n_jobs() if n_jobs is None else max(1, int(n_jobs))
+    if n_jobs > 1 and n >= PARALLEL_MIN_DRAWS and not _reaches_workers(wrapper):
+        import warnings
+        warnings.warn(f"wrapper {getattr(wrapper, '__qualname__', wrapper)!r} cannot be "
+                      f"sent to worker processes (a lambda, nested function, or one "
+                      f"defined in a notebook or __main__); scanning serially. Define it "
+                      f"at the top level of an importable module to run in parallel.",
+                      RuntimeWarning, stacklevel=2)
+        n_jobs = 1
+    args = (wrapper, names)
+    tail = (fixed_params, output_fields, label_fields)
+    if n_jobs == 1 or n < PARALLEL_MIN_DRAWS:
+        rows = []
+        step = max(1, n // 10)
+        for i0 in range(0, n, step):
+            rows += _evaluate_rows(*args, X[i0:i0 + step], *tail)
+            if verbose:
+                i = min(i0 + step, n)
+                print(f"  scan {i}/{n} ({i / n * 100:.0f}%)")
+    else:
+        # ~8 chunks per worker: enough to balance uneven solve times, few enough
+        # that pickling the wrapper and the results is negligible.
+        chunks = np.array_split(X, min(n, 8 * n_jobs))
+        with _worker_pool(n_jobs) as pool:
+            parts = list(pool.map(_evaluate_rows,
+                                  *zip(*[(*args, c, *tail) for c in chunks])))
+        rows = [r for part in parts for r in part]
+        if verbose:
+            print(f"  scan {n}/{n} (100%) on {n_jobs} workers")
 
     df = pd.DataFrame(rows)
+
+    # Reported whatever `verbose` says: a failed draw joins no cluster, so a
+    # silent failure would bias the clusters towards the parameter combinations
+    # the solver happens to handle.
+    n_fail = int((df['error'] != '').sum())
+    if n_fail:
+        top = df.loc[df['error'] != '', 'error'].value_counts().head(3)
+        print(f"  WARNING  {n_fail}/{n} draws failed ({n_fail / n:.2%}) and are "
+              f"labelled 'undefined'. Most common:")
+        for m_, c_ in top.items():
+            print(f"    {c_:6d} x {m_[:160]}")
 
     if save_path:
         _save_scan(df, save_path)
@@ -1180,7 +1417,13 @@ def plot_regime_exploration(partition, output_metrics=('flux', 'permeability', '
 
 
 
-TARGET_CLUSTER_SIZE = 1500   # rows wanted in each regime cluster; see below
+# Rows wanted in each regime cluster. The dummy-parameter floor of PAWN falls
+# roughly as 1/sqrt(n) -- 0.13 at n=500, 0.075 at 1500, 0.036 at 6000 on a
+# synthetic test -- while delta's barely moves (0.13, 0.08, 0.07: its KDE bias
+# does not shrink). At 1500 both floors sit near 0.08; 5000 roughly halves the
+# PAWN floor. The model evaluations it costs are cheap (well under 1 ms per
+# draw), and the indices parallelise.
+TARGET_CLUSTER_SIZE = 5000
 
 
 def size_draws_for_target(presets, regimes, target_cluster=TARGET_CLUSTER_SIZE,
@@ -1288,13 +1531,16 @@ def run_targeted_regime_scans(N_per_regime=None, regimes=('metal', 'surface', 'o
         raise KeyError(f"no preset for regime(s) {missing}; presets has {list(presets)}")
 
     clusters, scans, yields = {}, {}, {}
-    for r in regimes:
+    for i, r in enumerate(regimes):
         if verbose:
             print(f"\n--- targeted scan: {r} (N={N_per_regime[r]}) ---")
-        save_path = (f"{save_dir.rstrip('/')}/scan_{r}.csv" if save_dir else None)
         df, _ = run_global_lhs_scan(presets[r], N_per_regime[r], seed=seed,
-                                    wrapper=wrapper, save_path=save_path,
-                                    verbose=False, **scan_kw)
+                                    wrapper=wrapper, verbose=False, **scan_kw)
+        if save_dir:
+            # The stamp claims SCAN_VERSION only once the last scan is written,
+            # so an interrupted batch never passes a notebook's cache check.
+            _save_scan(df, os.path.join(save_dir, f"scan_{r}.csv"),
+                       complete=(i == len(regimes) - 1))
         df['target_preset'] = r
         cluster = df[df['regime'] == r].reset_index(drop=True)
         clusters[r], scans[r] = cluster, df
@@ -1320,6 +1566,8 @@ def load_regime_scans(save_dir, regimes=('metal', 'surface', 'oxide')):
     for r in regimes:
         path = os.path.join(save_dir, f'scan_{r}.csv')
         df = pd.read_csv(path)
+        # '' round-trips through CSV as NaN; scans older than the column lack it
+        df['error'] = df['error'].fillna('') if 'error' in df else ''
         scans[r] = df
         clusters[r] = df[df['regime'] == r].reset_index(drop=True)
     master = pd.concat([clusters[r] for r in regimes], ignore_index=True)
@@ -1345,19 +1593,41 @@ def _givendata_problem(X, names):
 def givendata_sensitivity_by_regime(clusters, param_names, output_metrics=REGIME_SA_METRICS,
                                     methods=('pawn', 'delta'), pawn_S=10,
                                     delta_resamples=100, seed=42,
-                                    log_metrics=LOG_METRICS_DEFAULT, n_dummy=3,
-                                    verbose=True):
+                                    log_metrics=LOG_METRICS_DEFAULT, n_dummy=20,
+                                    verbose=True, n_jobs=None,
+                                    logit_metrics=LOGIT_METRICS_DEFAULT):
     """
     Route B (primary): for each (regime, metric), run PAWN and Borgonovo-delta on the
     TRUE in-regime cluster — valid on arbitrary scattered points, zero new model evals.
 
     n_dummy : int
         Number of DUMMY inputs (uniform random columns the model never saw) appended
-        to X purely to measure the estimator's noise floor. delta is biased positive
-        for an irrelevant input, and that bias does NOT shrink with n — measured flat
-        at ~0.09 from n=400 to n=1500 — so without this an entire table of noise reads
-        as a ranking. Each entry gains 'floor' = max dummy delta; treat any parameter
-        not clearly above it as unresolved. Set 0 to disable.
+        to X purely to measure each estimator's noise floor. delta is biased positive
+        for an irrelevant input, and that bias barely shrinks with n (~0.08 at
+        n=1500, ~0.07 at n=6000), so without this an entire table of noise reads as
+        a ranking. PAWN's floor does shrink, roughly as 1/sqrt(n). Each entry gains
+        'floor' (max dummy delta) and 'floor_pawn' (max dummy PAWN median); treat a
+        parameter not clearly above both as unresolved. The floor is a maximum over
+        the dummies, so it rises with n_dummy: compare floors only between runs
+        that used the same n_dummy. Default 20. Set 0 to disable.
+    log_metrics, logit_metrics : sequences of metric names
+        Analysed as log10(Y) and log10(Y / (1 - Y)) respectively; any other metric
+        is analysed as it is. A metric spanning decades must be transformed: δ
+        integrates a KDE of Y on a 100-point grid, and a density spike narrower
+        than one grid step makes the integral, and δ, far exceed 1. An entry
+        whose δ still leaves [0, 1] gets NaN indices and a warning.
+
+    Notes
+    -----
+    These indices are REGIONAL. Each cluster is the set of draws, from one
+    regime's preset ranges, that the model put in that regime, so an index
+    answers "within this regime, under this preset, how much does the output
+    depend on this input?" It is conditional on the preset ranges (a pinned or
+    narrowed input has little room to matter) and on a selection made on the
+    model's output, which also makes the inputs within a cluster statistically
+    dependent, whereas the LHS drew them independently. Pass the full preset
+    scans (``scans`` from run_targeted_regime_scans) to the same function to get
+    the preset-wide indices without that selection, for comparison.
 
     Returns
     -------
@@ -1368,7 +1638,7 @@ def givendata_sensitivity_by_regime(clusters, param_names, output_metrics=REGIME
     """
     param_names = list(param_names)
     dummy_names = [f'_dummy_{i}' for i in range(n_dummy)]
-    results = {}
+    results, jobs = {}, []
     for reg, cdf in clusters.items():
         X = cdf[param_names].to_numpy(dtype=float)
         if n_dummy:
@@ -1379,45 +1649,88 @@ def givendata_sensitivity_by_regime(clusters, param_names, output_metrics=REGIME
         for m in output_metrics:
             Y = cdf[m].to_numpy(dtype=float)
             use_log = m in log_metrics
-            mask = (np.isfinite(Y) & (Y > 0)) if use_log else np.isfinite(Y)
-            Xv = X[mask]
-            Yv = np.log10(Y[mask]) if use_log else Y[mask]
-            entry = {'n': int(mask.sum()), 'log': use_log}
+            use_logit = m in logit_metrics and not use_log
+            mask = np.isfinite(Y)
+            if use_log:
+                mask &= Y > 0
+            elif use_logit:
+                mask &= (Y > 0) & (Y < 1)
+            Xv, Yv = X[mask], Y[mask]
+            if use_log:
+                Yv = np.log10(Yv)
+            elif use_logit:
+                Yv = np.log10(Yv / (1.0 - Yv))
+            entry = {'n': int(mask.sum()), 'log': use_log, 'logit': use_logit}
+            results[reg][m] = entry
             if entry['n'] < 10 or np.ptp(Yv) == 0:
                 entry['skipped'] = 'insufficient or degenerate output'
-                results[reg][m] = entry
                 if verbose:
                     print(f"  [{reg}/{m}] skipped ({entry['n']} pts)")
                 continue
-            if 'pawn' in methods:
-                entry['pawn'] = pawn_analyzer.analyze(problem, Xv, Yv, S=pawn_S, seed=seed)
-            if 'delta' in methods:
-                entry['delta'] = delta_analyzer.analyze(problem, Xv, Yv,
-                                                        num_resamples=delta_resamples,
-                                                        conf_level=0.95, seed=seed,
-                                                        print_to_console=False)
-            # Noise floor = the best score any dummy achieved. Indices for the real
-            # parameters are trimmed back to param_names so every downstream
-            # consumer still sees exactly the parameters it asked for.
-            if n_dummy and 'delta' in entry:
-                d_all = np.asarray(entry['delta']['delta'])
-                entry['floor'] = float(np.max(d_all[len(param_names):]))
-            for meth, keys in (('pawn', ('median', 'mean', 'minimum', 'CV')),
-                               ('delta', ('delta', 'delta_conf', 'S1', 'S1_conf'))):
-                if n_dummy and meth in entry:
-                    for k in keys:
-                        if k in entry[meth]:
-                            entry[meth][k] = np.asarray(entry[meth][k])[:len(param_names)]
-                    entry[meth]['names'] = list(param_names)
+            jobs.append((reg, m, (problem, Xv, Yv, tuple(methods), pawn_S,
+                                  delta_resamples, seed)))
 
-            results[reg][m] = entry
-            if verbose:
-                top, floor = '', entry.get('floor', np.nan)
-                if 'delta' in entry:
-                    d = np.asarray(entry['delta']['delta'])
-                    top = f"{param_names[int(np.argmax(d))]} ({np.max(d):.3f})"
-                print(f"  [{reg}/{m}] n={entry['n']:5d}  floor={floor:.3f}  top-δ: {top}")
+    # One SALib call per (regime, metric). Each seeds its own random state, so
+    # running them in worker processes gives exactly the serial numbers.
+    n_jobs = default_n_jobs() if n_jobs is None else max(1, int(n_jobs))
+    n_jobs = min(n_jobs, len(jobs))
+    if n_jobs <= 1:
+        outs = [_analyze_entry(*a) for _, _, a in jobs]
+    else:
+        with _worker_pool(n_jobs) as pool:
+            outs = list(pool.map(_analyze_entry, *zip(*[a for _, _, a in jobs])))
+
+    for (reg, m, _), out in zip(jobs, outs):
+        entry = results[reg][m]
+        entry.update(out)
+        # δ is half an L1 distance between densities, so it lies in [0, 1]. Outside
+        # that, the KDE integration has failed (see logit_metrics) and every δ in
+        # the entry, the floor included, is unreliable: blank them, don't rank them.
+        if 'delta' in entry and np.nanmax(entry['delta']['delta']) > 1.0:
+            import warnings
+            warnings.warn(f"[{reg}/{m}] delta reached "
+                          f"{np.nanmax(entry['delta']['delta']):.3g} > 1: the density "
+                          f"estimate failed; delta set to NaN. Transform the metric "
+                          f"(log_metrics / logit_metrics).", RuntimeWarning)
+            for k in ('delta', 'delta_conf'):
+                entry['delta'][k] = np.full(len(entry['delta'][k]), np.nan)
+        # Noise floor = the best score any dummy achieved. Indices for the real
+        # parameters are trimmed back to param_names so every downstream
+        # consumer still sees exactly the parameters it asked for.
+        if n_dummy and 'delta' in entry:
+            d_all = np.asarray(entry['delta']['delta'])
+            entry['floor'] = float(np.max(d_all[len(param_names):]))
+        if n_dummy and 'pawn' in entry:
+            p_all = np.asarray(entry['pawn']['median'])
+            entry['floor_pawn'] = float(np.max(p_all[len(param_names):]))
+        for meth, keys in (('pawn', ('median', 'mean', 'minimum', 'maximum', 'CV')),
+                           ('delta', ('delta', 'delta_conf', 'S1', 'S1_conf'))):
+            if n_dummy and meth in entry:
+                for k in keys:
+                    if k in entry[meth]:
+                        entry[meth][k] = np.asarray(entry[meth][k])[:len(param_names)]
+                entry[meth]['names'] = list(param_names)
+        if verbose:
+            top, floor = '', entry.get('floor', np.nan)
+            if 'delta' in entry:
+                d = np.asarray(entry['delta']['delta'])
+                top = f"{param_names[int(np.argmax(d))]} ({np.max(d):.3f})"
+            print(f"  [{reg}/{m}] n={entry['n']:5d}  floor δ={floor:.3f} "
+                  f"PAWN={entry.get('floor_pawn', np.nan):.3f}  top-δ: {top}")
     return results
+
+
+def _analyze_entry(problem, X, Y, methods, pawn_S, delta_resamples, seed):
+    """PAWN and/or delta for one (regime, metric); the unit of parallel work."""
+    out = {}
+    if 'pawn' in methods:
+        out['pawn'] = pawn_analyzer.analyze(problem, X, Y, S=pawn_S, seed=seed)
+    if 'delta' in methods:
+        out['delta'] = delta_analyzer.analyze(problem, X, Y,
+                                              num_resamples=delta_resamples,
+                                              conf_level=0.95, seed=seed,
+                                              print_to_console=False)
+    return out
 
 
 def summarize_givendata(results, param_names):
@@ -1435,6 +1748,7 @@ def summarize_givendata(results, param_names):
             s1 = (np.asarray(entry['delta']['S1']) if 'delta' in entry
                   else np.full(len(param_names), np.nan))
             floor = entry.get('floor', np.nan)
+            floor_p = entry.get('floor_pawn', np.nan)
             for j, p in enumerate(param_names):
                 rows.append({'regime': reg, 'metric': m, 'parameter': p,
                              'pawn_median': pawn_med[j], 'delta': delta[j],
@@ -1444,7 +1758,11 @@ def summarize_givendata(results, param_names):
                              'floor': floor,
                              'delta_over_floor': (delta[j] / floor
                                                   if floor and np.isfinite(floor)
-                                                  else np.nan)})
+                                                  else np.nan),
+                             'floor_pawn': floor_p,
+                             'pawn_over_floor': (pawn_med[j] / floor_p
+                                                 if floor_p and np.isfinite(floor_p)
+                                                 else np.nan)})
     return pd.DataFrame(rows)
 
 

@@ -25,7 +25,6 @@ import numpy as np
 from scipy.optimize import brentq
 from calculations.config.model_config import get_surface_kinetics_from_config
 from calculations.config.model_config import CONDITIONS, METALS, OXIDES
-from calculations.defective_metal import combined_microstructure_model
 
 R = 8.314  # J/(mol·K)
 
@@ -127,18 +126,38 @@ def sqrt_P_int_from_theta(theta, alpha, beta, K_eq, P_down):
     return (alpha * g + beta * np.sqrt(P_down)) / (alpha + beta)
 
 
-def smooth_surface_resistance(k_diss_eff, P_up, theta, eps_theta=1e-12, eps_rate=1e-60):
+def surface_resistance(k_diss, K_eq, P_up, theta, eps_theta=1e-12, eps_rate=1e-300):
     r"""
-    Smooth surface resistance with no hard cutoff.
+    Differential resistance of the dissociation step, in the units of 1/α and 1/β.
+
+    The oxide and the metal are linear in :math:`\sqrt{P}`,
+    :math:`J = \alpha\,(g - \sqrt{P_{int}}) = \beta\,(\sqrt{P_{int}} - \sqrt{P_{down}})`,
+    so :math:`1/\alpha` and :math:`1/\beta` are resistances per unit of
+    :math:`\sqrt{P}` [m² s Pa^½ / mol]. The surface delivers the virtual pressure
+    :math:`g(\theta) = \theta/((1-\theta)\sqrt{K_{eq}})` to the layers behind it,
+    and its resistance on the same scale is :math:`-dg/dJ_{surf}`:
 
     .. math::
 
-        R_{surface} \sim \frac{1}{k_{diss} P_{up} (1-\theta)^2}
+        r_{surf} = \frac{dg/d\theta}{-dJ_{surf}/d\theta}
+                 = \frac{1}{2\,k_{diss}\sqrt{K_{eq}}\,(1-\theta)^2
+                          \left[P_{up}(1-\theta) + \theta/K_{eq}\right]}
 
+    With all three resistances in one unit, :math:`r_i/\sum r` is step *i*'s
+    degree of rate control, :math:`\partial\ln J/\partial\ln k_i` (Campbell):
+    scaling :math:`k_{diss}` (at fixed :math:`K_{eq}`), α and β together scales J
+    at fixed θ, so the three fractions sum to exactly 1, and the step with the
+    largest one is the one whose speed-up would raise the flux most.
+
+    The reciprocal of the forward rate, :math:`1/(k_{diss}P_{up}(1-\theta)^2)`,
+    is not a substitute: its units are m² s/mol, not m² s Pa^½/mol, so it cannot
+    be added to 1/α and 1/β. Near equilibrium it is smaller than
+    :math:`r_{surf}` by :math:`\sqrt{P_{up}}/2` (158× at 1 bar).
     """
-    theta_clamped = min(max(theta, 0.0), 1.0 - eps_theta)
-    vacant = max(1.0 - theta_clamped, eps_theta)
-    rate = k_diss_eff * max(P_up, eps_theta) * (vacant ** 2)
+    theta_c = min(max(theta, 0.0), 1.0 - eps_theta)
+    vacant  = max(1.0 - theta_c, eps_theta)
+    rate    = 2.0 * k_diss * np.sqrt(K_eq) * vacant**2 * (max(P_up, 0.0) * vacant
+                                                          + theta_c / K_eq)
     return 1.0 / max(rate, eps_rate)
 
 
@@ -215,7 +234,7 @@ def solve_steady_state_flux_L1L6(P_up, P_down, L_m, k_diss, K_eq, D_m, K_s_m):
     sqrt_P_int = g_theta(theta_ss, K_eq)
     J_ss       = metal_flux_L1(theta_ss, beta, K_eq, P_down)
 
-    R_surface = smooth_surface_resistance(k_diss, P_up, theta_ss)
+    R_surface = surface_resistance(k_diss, K_eq, P_up, theta_ss)
     R_metal   = 1.0 / beta
     R_total   = R_surface + R_metal
 
@@ -293,7 +312,7 @@ def solve_steady_state_flux_L2aL6(P_up, P_down, k_diss, K_eq, D_ox, K_ox, L_ox):
     sqrt_P_surf = g_theta(theta_ss, K_eq)
     J_ss        = oxide_flux_L2a(theta_ss, alpha, K_eq, P_down)
 
-    R_surface = smooth_surface_resistance(k_diss, P_up, theta_ss)
+    R_surface = surface_resistance(k_diss, K_eq, P_up, theta_ss)
     R_oxide   = 1.0 / alpha
     R_total   = R_surface + R_oxide
 
@@ -366,7 +385,7 @@ def solve_steady_state_flux(P_up, P_down, L_m, oxide_name, metal_name, temperatu
     J_surf     = surface_flux(theta_ss, P_up, k_diss, K_eq)
     J_ox       = oxide_flux(theta_ss, alpha, beta, K_eq, P_down)
 
-    R_surface = smooth_surface_resistance(k_diss, P_up, theta_ss)
+    R_surface = surface_resistance(k_diss, K_eq, P_up, theta_ss)
     R_oxide   = 1.0 / alpha
     R_metal   = 1.0 / beta
     R_total   = R_surface + R_oxide + R_metal
@@ -449,7 +468,7 @@ def solve_steady_state_flux_direct(P_up, P_down, L_m, k_diss, K_eq,
     J_surf     = surface_flux(theta_ss, P_up, k_diss, K_eq)
     J_ox       = oxide_flux(theta_ss, alpha, beta, K_eq, P_down)
 
-    R_surface = smooth_surface_resistance(k_diss, P_up, theta_ss)
+    R_surface = surface_resistance(k_diss, K_eq, P_up, theta_ss)
     R_oxide   = 1.0 / alpha
     R_metal   = 1.0 / beta
     R_total   = R_surface + R_oxide + R_metal
@@ -499,24 +518,22 @@ def calculate_defective_metal_flux_L6(
     D_ox, K_ox, L_ox,
     D_lattice, K_s_m,
     microstructure_params,
-    lattice_density=1.06e29,
-    method='average', n_profile_points=50, mode='both',
-    max_iterations=15, tolerance=1e-6,
+    enable_gb_enhancement=True,
 ):
     """
-    Solve L2+L4+L6: perfect oxide + defective metal + surface kinetics.
+    Solve L2+L4+L6: perfect oxide + polycrystalline metal + surface kinetics.
 
-    Iterates to find self-consistent D_eff and θ_ss, since D_eff depends
-    on the concentration profile which depends on θ_ss.
+    :func:`solve_steady_state_flux_direct` with the metal's lattice diffusivity
+    replaced by the grain-boundary-enhanced one from
+    :func:`calculations.defective_metal.metal_diffusivity`. That diffusivity does
+    not depend on hydrogen concentration, so there is no self-consistency loop.
 
     Parameters
     ----------
-    P_up : float
-        Upstream H2 pressure [Pa].
-    P_down : float
-        Downstream H2 pressure [Pa].
+    P_up, P_down : float
+        Upstream and downstream H2 pressure [Pa].
     metal_thickness : float
-        Metal metal_thickness [m].
+        Metal thickness [m].
     temperature : float
         Temperature [K].
     k_diss, K_eq : float
@@ -526,195 +543,43 @@ def calculate_defective_metal_flux_L6(
     D_lattice, K_s_m : float
         Metal lattice properties.
     microstructure_params : dict
-        Grain size, traps, etc.
-    lattice_density : float
-        Lattice site density [sites/m³].
-    method : str
-        D_eff averaging: 'average', 'harmonic', 'inlet', 'outlet'
-    n_profile_points : int
-        Concentration profile discretisation points.
-    mode : str
-        Microstructure mode: 'both', 'gb_only', 'trapping_only', 'none'
-    max_iterations : int
-        Convergence iteration limit.
-    tolerance : float
-        Relative tolerance for D_eff convergence.
+        ``grain_size`` and ``gb_type``; optionally ``gb_thickness`` and ``model``.
+    enable_gb_enhancement : bool, optional
+        False reduces this to L2+L6. Default True.
 
     Returns
     -------
     dict
-        Keys: ``flux``, ``theta_surface``, ``P_int``, ``D_eff``, ``profiles``,
-        ``rate_limiting``, ``resistances``, ``convergence``.
+        Everything :func:`solve_steady_state_flux_direct` returns, plus ``flux``
+        (= ``J_ss``), ``theta_surface`` (= ``theta``), ``C_up``, ``C_down``,
+        ``beta_lattice``, ``beta_eff``, ``D_eff``, ``D_lattice`` and
+        ``modification_factor`` (D_eff / D_lattice, >= 1).
     """
+    from calculations.defective_metal import metal_diffusivity
+
     if P_up < 0 or P_down < 0:
         raise ValueError("Pressures must be non-negative")
     if metal_thickness <= 0:
         raise ValueError(f"Thickness must be positive: {metal_thickness} m")
-    if D_lattice <= 0:
-        raise ValueError("Diffusion coefficient must be positive")
     if k_diss <= 0 or K_eq <= 0:
         raise ValueError("Surface kinetics parameters must be positive")
 
-    alpha      = D_ox * K_ox / L_ox
-    D_eff      = D_lattice
-    sqrt_P_down = np.sqrt(max(P_down, 0))
-    convergence_history = []
-
-    for iteration in range(max_iterations):
-        beta = D_eff * K_s_m / metal_thickness
-
-        try:
-            theta_ss = solve_coverage(surface_flux_residual,
-                                      args=(P_up, alpha, beta, P_down, k_diss, K_eq))
-        except ValueError as e:
-            return {
-                'flux': np.nan,
-                'error': f'Failed to solve for theta at iteration {iteration}: {str(e)}',
-                'convergence_history': convergence_history,
-            }
-
-        sqrt_P_int = sqrt_P_int_from_theta(theta_ss, alpha, beta, K_eq, P_down)
-
-        x_array    = np.linspace(0, metal_thickness, n_profile_points)
-        sqrt_P_arr = sqrt_P_int - (sqrt_P_int - sqrt_P_down) * x_array / metal_thickness
-        C_array    = K_s_m * sqrt_P_arr
-
-        D_array          = np.zeros(n_profile_points)
-        theta_trap_array = np.zeros(n_profile_points)
-        gb_factor_array  = np.zeros(n_profile_points)
-
-        for i, C_local in enumerate(C_array):
-            C_local = max(C_local, 1e-20)
-            result_i = combined_microstructure_model(
-                D_lattice=D_lattice,
-                temperature=temperature,
-                microstructure_params=microstructure_params,
-                lattice_concentration=C_local,
-                lattice_density=lattice_density,
-                mode=mode,
-            )
-            D_array[i] = result_i['D_eff']
-            if 'trapping' in result_i and result_i['trapping'] is not None:
-                theta_trap_array[i] = result_i['trapping'].get('theta_total', 0.0)
-            elif 'theta_total' in result_i:
-                theta_trap_array[i] = result_i['theta_total']
-            if 'gb_enhancement' in result_i and result_i['gb_enhancement'] is not None:
-                gb_factor_array[i] = result_i['gb_enhancement'].get('factor', 1.0)
-            elif 'gb_enhancement_factor' in result_i:
-                gb_factor_array[i] = result_i['gb_enhancement_factor']
-            else:
-                gb_factor_array[i] = 1.0
-
-        if method == 'harmonic':
-            D_eff_new = len(D_array) / np.sum(1.0 / D_array)
-        elif method == 'inlet':
-            D_eff_new = D_array[0]
-        elif method == 'outlet':
-            D_eff_new = D_array[-1]
-        else:
-            D_eff_new = np.mean(D_array)
-
-        rel_change = abs(D_eff_new - D_eff) / D_eff if D_eff > 0 else np.inf
-        convergence_history.append({
-            'iteration': iteration,
-            'D_eff': D_eff_new,
-            'theta': theta_ss,
-            'relative_change': rel_change,
-        })
-
-        if rel_change < tolerance:
-            D_eff = D_eff_new
-            break
-        D_eff = D_eff_new
-
-    beta_eff   = D_eff * K_s_m / metal_thickness
-    sqrt_P_int = sqrt_P_int_from_theta(theta_ss, alpha, beta_eff, K_eq, P_down)
-    P_int      = sqrt_P_int**2
-    C_up       = K_s_m * sqrt_P_int
-    C_down     = K_s_m * sqrt_P_down if P_down > 0 else 0.0
-    J_metal    = metal_flux(theta_ss, alpha, beta_eff, K_eq, P_down)
-    J_surface  = surface_flux(theta_ss, P_up, k_diss, K_eq)
-    J_oxide    = oxide_flux(theta_ss, alpha, beta_eff, K_eq, P_down)
-
-    R_surface = smooth_surface_resistance(k_diss, P_up, theta_ss)
-    R_oxide   = 1.0 / alpha
-    R_metal   = 1.0 / beta_eff
-    R_total   = R_surface + R_oxide + R_metal
-
-    fraction_surface = R_surface / R_total if R_total > 0 else 0
-    fraction_oxide   = R_oxide   / R_total if R_total > 0 else 0
-    fraction_metal   = R_metal   / R_total if R_total > 0 else 0
-
-    if fraction_surface > 0.5:
-        rate_limiting = 'surface'
-    elif fraction_oxide > 0.5:
-        rate_limiting = 'oxide'
-    elif fraction_metal > 0.5:
-        rate_limiting = 'metal'
-    else:
-        rate_limiting = 'mixed'
-
-    modification_factor = D_eff / D_lattice
-    avg_gb_factor       = np.mean(gb_factor_array)
-    avg_theta_trap      = np.mean(theta_trap_array)
-    trap_reduction      = 1.0 / (1.0 + avg_theta_trap) if avg_theta_trap > 0 else 1.0
-
-    if avg_gb_factor > 1.5 and trap_reduction > 0.5:
-        dominant_effect = 'gb_enhancement'
-    elif avg_gb_factor < 1.5 and trap_reduction < 0.5:
-        dominant_effect = 'trapping'
-    else:
-        dominant_effect = 'balanced'
-
-    return {
-        'flux':      J_metal,
-        'J_surface': J_surface,
-        'J_oxide':   J_oxide,
-        'J_metal':   J_metal,
-        'theta_surface': theta_ss,
-        'P_int':     P_int,
-        'C_up':      C_up,
-        'C_down':    C_down,
-        'alpha':     alpha,
-        'beta_lattice': D_lattice * K_s_m / metal_thickness,
-        'beta_eff':  beta_eff,
-        'D_eff':     D_eff,
-        'D_lattice': D_lattice,
-        'modification_factor': modification_factor,
-        'microstructure_details': {
-            'average_theta_trap':    avg_theta_trap,
-            'average_gb_enhancement': avg_gb_factor,
-            'trap_reduction_factor': trap_reduction,
-            'dominant_effect':       dominant_effect,
-            'method_used':           method,
-        },
-        'flux_balance': {
-            'J_surface': J_surface,
-            'J_oxide':   J_oxide,
-            'J_metal':   J_metal,
-            'balanced':  np.allclose(J_surface, J_oxide, rtol=1e-4) and
-                         np.allclose(J_oxide, J_metal, rtol=1e-4),
-        },
-        'profiles': {
-            'x': x_array, 'D': D_array, 'C': C_array,
-            'theta_trap': theta_trap_array, 'gb_factor': gb_factor_array,
-        },
-        'rate_limiting': rate_limiting,
-        'resistances': {
-            'R_surface':        R_surface,
-            'R_oxide':          R_oxide,
-            'R_metal':          R_metal,
-            'R_total':          R_total,
-            'fraction_surface': fraction_surface,
-            'fraction_oxide':   fraction_oxide,
-            'fraction_metal':   fraction_metal,
-        },
-        'convergence': {
-            'iterations': len(convergence_history),
-            'converged':  len(convergence_history) < max_iterations,
-            'history':    convergence_history,
-        },
-    }
+    D_eff = metal_diffusivity(D_lattice, temperature, microstructure_params,
+                              enable_gb_enhancement)
+    r = solve_steady_state_flux_direct(P_up, P_down, metal_thickness, k_diss, K_eq,
+                                       D_ox, K_ox, L_ox, D_eff, K_s_m)
+    r.update({
+        'flux':          r['J_ss'],
+        'theta_surface': r['theta'],
+        'C_up':          K_s_m * np.sqrt(r['P_int']),
+        'C_down':        K_s_m * np.sqrt(max(P_down, 0.0)),
+        'beta_lattice':  D_lattice * K_s_m / metal_thickness,
+        'beta_eff':      r['beta'],
+        'D_eff':         D_eff,
+        'D_lattice':     D_lattice,
+        'modification_factor': D_eff / D_lattice,
+    })
+    return r
 
 
 # =============================================================================
@@ -819,7 +684,7 @@ def calculate_path_flux_L6(
             J_ss       = beta * (sqrt_P_int - sqrt_P_down)
             J_surf     = surface_flux(theta_ss, P_up, k_diss_eff, K_eq_eff)
             J_ox       = np.nan
-            R_surface  = smooth_surface_resistance(k_diss_eff, P_up, theta_ss)
+            R_surface  = surface_resistance(k_diss_eff, K_eq_eff, P_up, theta_ss)
             R_oxide    = 0.0
             R_metal    = 1.0 / beta
             R_total    = R_surface + R_metal
@@ -872,7 +737,7 @@ def calculate_path_flux_L6(
     J_surf     = surface_flux(theta_ss, P_up, k_diss, K_eq)
     J_ox       = oxide_flux(theta_ss, alpha, beta, K_eq, P_down)
 
-    R_surface = smooth_surface_resistance(k_diss, P_up, theta_ss)
+    R_surface = surface_resistance(k_diss, K_eq, P_up, theta_ss)
     R_oxide   = 1.0 / alpha
     R_metal   = 1.0 / beta
     R_total   = R_surface + R_oxide + R_metal
@@ -1168,20 +1033,16 @@ def calculate_path_flux_L346_v2(
     D_lattice, K_s_m,
     microstructure_params,
     path_type='intact',
-    lattice_density=1.06e29,
-    method='average',
-    n_profile_points=20,
-    mode='both',
-    max_iterations=10,
-    tolerance=1e-5,
+    enable_gb_enhancement=True,
     k_diss_metal=None,
     K_eq_metal=None,
 ):
     """
     Flux through a single oxide path with defective metal (L3+L4+L6 building block).
 
-    Combines L6 surface kinetics, variable α for oxide path type, and L4
-    microstructure effects in the metal via iterative D_eff convergence.
+    Combines L6 surface kinetics, variable α for oxide path type, and the
+    grain-boundary-enhanced metal diffusivity from
+    :func:`calculations.defective_metal.metal_diffusivity`.
 
     Parameters
     ----------
@@ -1200,21 +1061,11 @@ def calculate_path_flux_L346_v2(
     D_lattice, K_s_m : float
         Metal lattice properties.
     microstructure_params : dict
-        Grain size, traps, etc.
+        ``grain_size`` and ``gb_type``; optionally ``gb_thickness`` and ``model``.
     path_type : str
         'intact', 'pinhole', 'crack', 'grain_boundary'
-    lattice_density : float
-        Lattice site density [sites/m³].
-    method : str
-        D_eff averaging method.
-    n_profile_points : int
-        Profile discretisation points.
-    mode : str
-        Microstructure mode.
-    max_iterations : int
-        D_eff convergence limit.
-    tolerance : float
-        Relative tolerance for D_eff convergence.
+    enable_gb_enhancement : bool
+        False uses the lattice diffusivity. Default True.
     k_diss_metal, K_eq_metal : float|None
         Metal kinetics for pinhole path.
 
@@ -1222,8 +1073,7 @@ def calculate_path_flux_L346_v2(
     -------
     dict
         Keys: ``flux``, ``theta``, ``P_int``, ``D_eff``,
-        ``modification_factor``, ``profiles``, ``resistances``,
-        ``rate_limiting``, ``convergence``.
+        ``modification_factor``, ``resistances``, ``rate_limiting``.
     """
     is_pinhole  = (path_type == 'pinhole' or alpha == np.inf or alpha > 1e10)
     sqrt_P_down = np.sqrt(max(P_down, 0))
@@ -1241,100 +1091,49 @@ def calculate_path_flux_L346_v2(
         K_eq_eff        = K_eq
         use_sieverts_limit = False
 
-    D_eff               = D_lattice
-    convergence_history = []
+    from calculations.defective_metal import metal_diffusivity
 
-    for iteration in range(max_iterations):
-        beta = D_eff * K_s_m / L_m
+    D_eff = metal_diffusivity(D_lattice, temperature, microstructure_params,
+                              enable_gb_enhancement)
+    beta  = D_eff * K_s_m / L_m
 
-        if is_pinhole and use_sieverts_limit:
-            sqrt_P_int = sqrt_P_up
-            theta_ss   = 0.0
-        else:
-            def residual(theta):
-                if theta <= 0 or theta >= 1:
-                    return np.inf
-                J_surf_loc = surface_flux(theta, P_up, k_diss_eff, K_eq_eff)
-                if is_pinhole:
-                    sqrt_P_int_loc = g_theta(theta, K_eq_eff)
-                else:
-                    sqrt_P_int_loc = sqrt_P_int_from_theta(theta, alpha, beta, K_eq, P_down)
-                J_metal_loc = beta * (sqrt_P_int_loc - sqrt_P_down)
-                return J_surf_loc - J_metal_loc
-
-            try:
-                theta_ss = solve_coverage(residual, theta_max=1.0 - 1e-12)
-            except ValueError as e:
-                _nan_resistances = {
-                    'R_surface': np.nan, 'R_oxide': np.nan, 'R_metal': np.nan,
-                    'R_total': np.nan, 'fraction_surface': np.nan,
-                    'fraction_oxide': np.nan, 'fraction_metal': np.nan,
-                }
-                return {
-                    'flux': np.nan, 'theta': np.nan, 'P_int': np.nan, 'D_eff': np.nan,
-                    'path_type': path_type, 'kinetics_used': 'error',
-                    'modification_factor': np.nan, 'rate_limiting': 'error',
-                    'resistances': _nan_resistances,
-                    'error': f'Failed to solve for theta: {str(e)}',
-                    'iteration': iteration,
-                }
-
+    if is_pinhole and use_sieverts_limit:
+        sqrt_P_int = sqrt_P_up
+        theta_ss   = 0.0
+    else:
+        def residual(theta):
+            if theta <= 0 or theta >= 1:
+                return np.inf
+            J_surf_loc = surface_flux(theta, P_up, k_diss_eff, K_eq_eff)
             if is_pinhole:
-                sqrt_P_int = g_theta(theta_ss, K_eq_eff)
+                sqrt_P_int_loc = g_theta(theta, K_eq_eff)
             else:
-                sqrt_P_int = sqrt_P_int_from_theta(theta_ss, alpha, beta, K_eq, P_down)
+                sqrt_P_int_loc = sqrt_P_int_from_theta(theta, alpha, beta, K_eq, P_down)
+            J_metal_loc = beta * (sqrt_P_int_loc - sqrt_P_down)
+            return J_surf_loc - J_metal_loc
 
-        x_array    = np.linspace(0, L_m, n_profile_points)
-        sqrt_P_arr = sqrt_P_int - (sqrt_P_int - sqrt_P_down) * x_array / L_m
-        C_array    = K_s_m * sqrt_P_arr
+        try:
+            theta_ss = solve_coverage(residual, theta_max=1.0 - 1e-12)
+        except ValueError as e:
+            _nan_resistances = {
+                'R_surface': np.nan, 'R_oxide': np.nan, 'R_metal': np.nan,
+                'R_total': np.nan, 'fraction_surface': np.nan,
+                'fraction_oxide': np.nan, 'fraction_metal': np.nan,
+            }
+            return {
+                'flux': np.nan, 'theta': np.nan, 'P_int': np.nan, 'D_eff': np.nan,
+                'path_type': path_type, 'kinetics_used': 'error',
+                'modification_factor': np.nan, 'rate_limiting': 'error',
+                'resistances': _nan_resistances,
+                'error': f'Failed to solve for theta: {str(e)}',
+            }
 
-        D_array          = np.zeros(n_profile_points)
-        theta_trap_array = np.zeros(n_profile_points)
-        gb_factor_array  = np.zeros(n_profile_points)
-
-        for i, C_local in enumerate(C_array):
-            C_local = max(C_local, 1e-20)
-            result_i = combined_microstructure_model(
-                D_lattice=D_lattice,
-                temperature=temperature,
-                microstructure_params=microstructure_params,
-                lattice_concentration=C_local,
-                lattice_density=lattice_density,
-                mode=mode,
-            )
-            D_array[i] = result_i['D_eff']
-            if 'trapping' in result_i and result_i['trapping'] is not None:
-                theta_trap_array[i] = result_i['trapping'].get('theta_total', 0.0)
-            elif 'theta_total' in result_i:
-                theta_trap_array[i] = result_i['theta_total']
-            if 'gb_enhancement' in result_i and result_i['gb_enhancement'] is not None:
-                gb_factor_array[i] = result_i['gb_enhancement'].get('factor', 1.0)
-            elif 'gb_enhancement_factor' in result_i:
-                gb_factor_array[i] = result_i['gb_enhancement_factor']
-            else:
-                gb_factor_array[i] = 1.0
-
-        if method == 'harmonic':
-            D_eff_new = len(D_array) / np.sum(1.0 / D_array)
-        elif method == 'inlet':
-            D_eff_new = D_array[0]
-        elif method == 'outlet':
-            D_eff_new = D_array[-1]
+        if is_pinhole:
+            sqrt_P_int = g_theta(theta_ss, K_eq_eff)
         else:
-            D_eff_new = np.mean(D_array)
+            sqrt_P_int = sqrt_P_int_from_theta(theta_ss, alpha, beta, K_eq, P_down)
 
-        rel_change = abs(D_eff_new - D_eff) / D_eff if D_eff > 0 else np.inf
-        convergence_history.append({
-            'iteration': iteration, 'D_eff': D_eff_new,
-            'theta': theta_ss, 'relative_change': rel_change,
-        })
-
-        if rel_change < tolerance:
-            D_eff = D_eff_new
-            break
-        D_eff = D_eff_new
-
-    beta_eff = D_eff * K_s_m / L_m
+    beta_eff = beta
     P_int    = sqrt_P_int**2
     J_metal  = beta_eff * (sqrt_P_int - sqrt_P_down)
 
@@ -1349,14 +1148,14 @@ def calculate_path_flux_L346_v2(
         J_surface    = surface_flux(theta_ss, P_up, k_diss_eff, K_eq_eff)
         J_oxide      = np.nan
         R_oxide      = 0.0
-        R_surface    = smooth_surface_resistance(k_diss_eff, P_up, theta_ss)
+        R_surface    = surface_resistance(k_diss_eff, K_eq_eff, P_up, theta_ss)
         alpha_out    = np.inf
         kinetics_used = 'metal'
     else:
         J_surface    = surface_flux(theta_ss, P_up, k_diss, K_eq)
         J_oxide      = oxide_flux(theta_ss, alpha, beta_eff, K_eq, P_down)
         R_oxide      = 1.0 / alpha
-        R_surface    = smooth_surface_resistance(k_diss, P_up, theta_ss)
+        R_surface    = surface_resistance(k_diss, K_eq, P_up, theta_ss)
         alpha_out    = alpha
         kinetics_used = 'oxide'
 
@@ -1390,10 +1189,6 @@ def calculate_path_flux_L346_v2(
         'D_eff':     D_eff,
         'D_lattice': D_lattice,
         'modification_factor': modification_factor,
-        'microstructure': {
-            'avg_gb_factor':   np.mean(gb_factor_array),
-            'avg_theta_trap':  np.mean(theta_trap_array),
-        },
         'flux_balance': {
             'J_surface': J_surface, 'J_oxide': J_oxide, 'J_metal': J_metal,
         },
@@ -1403,15 +1198,6 @@ def calculate_path_flux_L346_v2(
             'fraction_oxide': fraction_oxide, 'fraction_metal': fraction_metal,
         },
         'rate_limiting': rate_limiting,
-        'convergence': {
-            'iterations': len(convergence_history),
-            'converged':  len(convergence_history) < max_iterations,
-            'history':    convergence_history,
-        },
-        'profiles': {
-            'x': x_array, 'D': D_array, 'C': C_array,
-            'theta_trap': theta_trap_array, 'gb_factor': gb_factor_array,
-        },
     }
 
 
@@ -1422,10 +1208,7 @@ def calculate_full_model_flux_L346_v2(
     D_lattice, K_s_m,
     microstructure_params,
     defect_config,
-    lattice_density=1.06e29,
-    method='average',
-    n_profile_points=20,
-    mode='both',
+    enable_gb_enhancement=True,
     k_diss_metal=None,
     K_eq_metal=None,
 ):
@@ -1453,7 +1236,7 @@ def calculate_full_model_flux_L346_v2(
     D_lattice, K_s_m : float
         Metal lattice properties.
     microstructure_params : dict
-        Grain size, traps, etc.
+        ``grain_size`` and ``gb_type``; optionally ``gb_thickness`` and ``model``.
     defect_config : dict
         Oxide defect configuration (see below).
     k_diss_metal, K_eq_metal : float|None
@@ -1493,8 +1276,7 @@ def calculate_full_model_flux_L346_v2(
         k_diss, K_eq, alpha_intact,
         D_lattice, K_s_m, microstructure_params,
         path_type='intact',
-        lattice_density=lattice_density, method=method,
-        n_profile_points=n_profile_points, mode=mode,
+        enable_gb_enhancement=enable_gb_enhancement,
     )
 
     defect_results = {}
@@ -1516,8 +1298,7 @@ def calculate_full_model_flux_L346_v2(
             k_diss, K_eq, alpha_defect,
             D_lattice, K_s_m, microstructure_params,
             path_type=defect_type,
-            lattice_density=lattice_density, method=method,
-            n_profile_points=n_profile_points, mode=mode,
+            enable_gb_enhancement=enable_gb_enhancement,
             k_diss_metal=k_diss_metal if defect_type == 'pinhole' else None,
             K_eq_metal=K_eq_metal   if defect_type == 'pinhole' else None,
         )

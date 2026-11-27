@@ -58,7 +58,7 @@ extensions = [
     "sphinx.ext.napoleon",     # those docstrings are NumPy-style; without this each is one blob
     "sphinx.ext.viewcode",     # [source] link per function — the physics lives in the code
     "sphinx.ext.intersphinx",  # makes numpy.ndarray / scipy.optimize.brentq clickable
-    "sphinx.ext.mathjax",      # renders the $$-blocks in TRAPPING_VALIDATION.md and STEADY_STATE.md
+    "sphinx.ext.mathjax",      # renders the $$-blocks in STEADY_STATE.md and the theory pages
     "myst_parser",             # without it Sphinx cannot read the GitHub-flavoured .md files at all
 ]
 
@@ -70,6 +70,14 @@ exclude_patterns = [
     "_build", "Thumbs.db", ".DS_Store",
     # Tooling, not content: the doc verifier and the worked-values generator.
     "_tools",
+    # Figure SOURCES, not pages. The .svg files here are still copied into the build
+    # wherever a page references them -- exclude_patterns governs which documents are
+    # PARSED, not which images are collected -- but captions.md is generated output
+    # that belongs to no toctree, and with -W an orphan page fails the build.
+    "figures",
+    # Working state for whoever resumes the documentation rebuild. Read on GitHub,
+    # not part of the reference site.
+    "CHECKPOINT.md",
 ]
 templates_path = ["_templates"]
 
@@ -79,8 +87,7 @@ myst_enable_extensions = [
     "dollarmath",   # required: $...$ / $$...$$ is how all the root .md files write math
     "colon_fence",  # lets the stub pages use :::{warning} without nested-backtick pain
 ]
-# TRAPPING_VALIDATION.md uses \begin{cases} inside $$, which MathJax handles
-# natively; there is no block-level \begin{align}, so `amsmath` is not needed.
+# There is no block-level \begin{align} in any page, so `amsmath` is not needed.
 
 myst_heading_anchors = 3         # stable #slug per heading, so cross-file deep links keep working
 myst_dmath_double_inline = True  # tolerate a $$...$$ that sits on one line
@@ -128,6 +135,7 @@ napoleon_custom_sections = [
     ("Module Structure", "notes"),
     ("Physical Parameters", "notes"),
     ("Usage", "notes"),
+    ("Why there is no trapping here", "notes"),  # defective_metal module docstring
 ]
 
 # --- autodoc ------------------------------------------------------------------

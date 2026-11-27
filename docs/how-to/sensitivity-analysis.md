@@ -86,8 +86,9 @@ exactly what a regime-filtered cluster is.
 and density-based estimators get hijacked by a few enormous values — δ came out
 as 46 and −93389 in early runs, impossible for an index defined on [0,1]. Taking
 the logarithm asks what controls the *order of magnitude* of flux, which is the
-question worth answering anyway. `theta` is already on [0,1] and stays linear.
-Controlled by `LOG_METRICS_DEFAULT`, currently `('flux', 'permeability')`.
+question worth answering anyway. `theta` is bounded but spans decades too, so it is
+analysed as `log10(theta / (1 - theta))`. Controlled by `LOG_METRICS_DEFAULT`, currently
+`('flux', 'permeability')`, and `LOGIT_METRICS_DEFAULT`, currently `('theta',)`.
 ```
 
 ## Sizing the draws
@@ -95,7 +96,7 @@ Controlled by `LOG_METRICS_DEFAULT`, currently `('flux', 'permeability')`.
 Cluster size is chosen adaptively rather than fixed. `size_draws_for_target`
 runs a short probe (`probe_n=250`) per preset to measure its yield — what
 fraction of draws actually land in the target regime — then scales up to reach
-`target_cluster=1500` rows, with a `safety=1.15` margin and an `n_max=200000`
+`target_cluster=5000` rows (`TARGET_CLUSTER_SIZE`), with a `safety=1.15` margin and an `n_max=200000`
 cap. `run_targeted_regime_scans(N_per_regime=None)` invokes this automatically
 and enforces `min_cluster=300`.
 
@@ -118,8 +119,16 @@ scoring appreciably above the dummy are resolved as sensitive; the rest are not
 resolved.
 
 `givendata_sensitivity_by_regime(..., n_dummy=N)` implements this, reporting
-`floor` and `delta_over_floor`. Because `floor = max(dummy indices)`, it is an
-order statistic over `n_dummy` samples.
+`floor` / `delta_over_floor` for δ and `floor_pawn` / `pawn_over_floor` for PAWN.
+Because each floor is the maximum over the dummies, it is an order statistic over
+`n_dummy` samples and rises with `n_dummy`; the default and both notebooks use 20,
+so floors compare between runs.
+
+The two floors behave differently with cluster size. On a synthetic test δ's floor
+went 0.13, 0.08, 0.08, 0.07 at n = 500, 1500, 3000, 6000 — its kernel-density bias
+does not shrink — while PAWN's went 0.13, 0.075, 0.05, 0.036, roughly as $1/\sqrt{n}$.
+So δ cannot resolve an effect much below 0.07 however large the cluster, and at the
+5000-row clusters used here PAWN is the more discriminating of the two.
 
 ### Below the floor does not mean "no physical effect"
 
@@ -152,15 +161,15 @@ averaged it away.
 
 Puy et al. also report that PAWN "especially underperformed" on test functions
 with 8 and 20 inputs, and raise this as a red flag for models with tens of
-parameters. This pipeline varies **36**. Treat PAWN rankings as corroborating
+parameters. This pipeline varies **27**. Treat PAWN rankings as corroborating
 evidence alongside δ, not as a standalone verdict.
 
 ## What is varied, and what is not
 
 | | L5 | L5L6 |
 |---|---|---|
-| parameters with defaults | 36 | 46 |
-| parameters actually swept | 28 | **36** |
+| parameters with defaults | 25 | 35 |
+| parameters actually swept | 19 | **27** |
 
 The four reference temperatures — `T_ref_metal`, `T_ref_oxide`,
 `T_ref_surface`, `T_ref_surface_metal` — are held **fixed** and appear in no

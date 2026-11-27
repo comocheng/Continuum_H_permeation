@@ -20,9 +20,9 @@ Source: {doc}`getting-started`
 
 ```{warning}
 **Level 5 is metal-limited, so the oxide barely matters — but Level 5L6 is not.**
-With the 1 µm Cr₂O₃ layer on 316L at 873 K, Level 5 gives `frac_oxide = 7.8e-3` and
-`PRF ≈ 1.004`: the coating is almost invisible. Under the Level 6 family the same wall
-is **oxide-limited** (`frac_oxide = 0.70`), because dissociation at the gas/oxide
+With the 1 µm Cr₂O₃ layer on 316L at 873 K, Level 5 gives `frac_oxide = 5.3e-3` and
+`PRF ≈ 1.005`: the coating is almost invisible. Under the Level 6 family the same wall
+is **oxide-limited** (`frac_oxide = 0.74`), because dissociation at the gas/oxide
 surface sends atomic H through the oxide under Sieverts rather than intact H₂ under
 Henry, and thickness then bites.
 
@@ -137,7 +137,7 @@ At the default operating point:
 | Sieverts form, same constant | 1.265437e-06 |
 
 For the active study this does not change the Level 5 conclusion — the 1 µm oxide is
-non-limiting under Henry, so `regime` is `metal` and `PRF ≈ 1.004`. Under the Level 6
+non-limiting under Henry, so `regime` is `metal` and `PRF ≈ 1.005`. Under the Level 6
 family the same wall is oxide-limited, which is the clearest demonstration that the
 two models are not refinements of each other. It *would* matter for a thicker or less
 permeable oxide, and it means a Level 3 defect result is not directly comparable
@@ -200,55 +200,30 @@ silently use a fabricated answer, so treat `converged` as part of the result, no
 as diagnostics.
 ```
 
-## Level 4 — metal microstructure
-
-Source: {doc}`theory/level4-microstructure`
-
-### Two similar-sounding diffusivities differ by 32%
-
-```{warning}
-**Two similar-sounding quantities are not the same, and confusing them is a 32%
-error.** The code distinguishes:
-
-| Key | Meaning | Value here |
-|---|---|---|
-| `trapping_term` | $\sum_i N_{T,i}K_i/N_L$ — the denominator | 0.354429 |
-| `theta_total` | $\sum_i \theta_i$, sum of trap *occupancies* | 0.026371 |
-
-`reduction_factor` $= 1/(1 + \texttt{trapping\_term})$, verified exact. The
-occupancy sum is carried "for info" and appears in **no** formula.
-
-The project's earlier design note wrote the denominator as $1 + \theta_{\text{total}}$,
-using the name the code gives the occupancy sum. Substituting the occupancy sum
-into the formula gives $D_{\text{eff}} = 2.304828\times10^{-10}$ instead of the
-correct $1.746573\times10^{-10}$ — **32% high**. If you have inherited that
-formula, check which quantity you fed it.
-```
-
 ## Level 6 — surface kinetics
 
 Source: {doc}`theory/level6-surface-kinetics`
 
-### `rate_limiting` and `fraction_surface` do not measure what the surface cost
+### `fraction_surface` is local: it measures what speeding the surface up would gain
 
 ```{warning}
-**`rate_limiting` and `fraction_surface` do not measure what the surface cost
-you.** They are computed at the *solved* operating point, so they answer "given
-this coverage, where does the remaining driving force drop?" — not "how much flux
-was lost relative to an infinitely fast surface?"
+**`fraction_surface` and `rate_limiting` are local measures.** Every resistance
+fraction is a degree of rate control, $X_i = \partial\ln J/\partial\ln k_i$,
+evaluated at the *solved* operating point: it answers "if this step alone were made
+a little faster, how much would the flux rise?" It does not answer "how much flux was
+lost relative to an infinitely fast surface?", which is a global comparison.
 
-The surface acts by **depressing the effective upstream pressure**, and that loss
-happens before the series decomposition begins. A surface holding 2.78% of the
-resistance can still be responsible for a ninefold flux reduction.
+The two can differ. The surface acts by **depressing the effective upstream
+pressure**, and on the 316L bare metal at 873 K it costs a factor of 9.2 in flux
+while carrying 46% of the rate control, a hair less than the metal's 54%, so
+`rate_limiting` reads `metal`. Both statements are true: the surface and the metal
+are similarly slow, and removing the surface step altogether would help a lot.
 
-This is why `calculations.sensitivity` documents `flux` as the primary metric —
-its comment notes it is *the only metric that responds to surface kinetics*.
-`permeability` is now derived from that same flux, so it does move with the
-surface — but only as the flux moves, and it remains an apparent value that means
-nothing without its operating point ({doc}`theory/permeability`). `frac_surface` sees
-only the residual series share. If you want to know whether surface kinetics
-matter, compare fluxes with and without them, or inspect $\theta$ against
-$\theta_{eq}$.
+If you want the global cost of surface kinetics, compare fluxes with and without
+them, or inspect $\theta$ against $\theta_{eq}$, or read `eta_surf`.
+`permeability` is derived from the same flux, so it moves with the surface only as
+the flux moves, and it remains an apparent value that means nothing without its
+operating point ({doc}`theory/permeability`).
 ```
 
 ## Two models, not six levels
@@ -326,10 +301,10 @@ Source: {doc}`how-to/switch-study`
 ### The verifier reports four pre-existing problems on the active study
 
 ```{warning}
-On the 316L studies (`Guo_etal_2025/`, `Application/`) this currently reports **four
+On the 316L study (`Guo_etal_2025/`) this currently reports **four
 pre-existing problems** — `D_ref`, `k_diss_metal_ref` and `E_diss_metal` defaults
 lying outside their own sweep ranges. They are not caused by switching; they are
-present in those studies' files as shipped, and the Incoloy and Hastelloy N studies
+present in that study's file as shipped, and the Incoloy and Hastelloy N studies
 report clean.
 
 A default outside its sweep range means the sensitivity analysis never evaluates the
