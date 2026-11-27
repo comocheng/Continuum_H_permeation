@@ -45,10 +45,9 @@ Entry points are the six notebooks each study folder carries; `Guo_etal_2025/` i
 | `regime_parallel_coords.ipynb` | Parallel-coordinates views of the L5L6 regime clusters |
 | `regime_parallel_coords_L5.ipynb` | Same, for the Level 5 clusters |
 
-`Application/` is the working copy. `Guo_etal_2025/`, `Fuerst_et_al_2024/` and
-`incoloy802_cr2o3/` hold the same six notebooks as run against each study, with
-outputs committed. Each of the four also holds the `study_config.py` its notebooks
-run on.
+`Guo_etal_2025/`, `Fuerst_et_al_2024/` and `incoloy802_cr2o3/` hold the same six
+notebooks as run against each study, with outputs committed. Each also holds the
+`study_config.py` its notebooks run on.
 
 Every notebook writes its figures into one folder beside it, named after it —
 `Proposal.ipynb` → `Proposal-results/`, and so on — created by
@@ -77,9 +76,8 @@ calculations/           Physics modules
     model_config.py       Loads the one active study — see Configuration below
     __init__.py           Where studies live, and the add-a-study recipe
 
-Application/            Notebooks + study_config.py (working copy, and what ships)
-  <Notebook>-results/     Figures from that notebook, one folder each
 Guo_etal_2025/          One folder per study: its notebooks AND its input file
+  <Notebook>-results/     Figures from that notebook, one folder each
 Fuerst_et_al_2024/
 incoloy802_cr2o3/
 
@@ -104,7 +102,6 @@ that folder's study. There is no switch to edit.
 | `Guo_etal_2025/` | `study_config.py` | 316L / Cr₂O₃ |
 | `Fuerst_et_al_2024/` | `study_config.py` | Hastelloy N / Cr₂O₃ |
 | `incoloy802_cr2o3/` | `study_config.py` | Incoloy 802 (X40 NiCrAlTi 31/19) / Cr₂O₃ |
-| `Application/` | `study_config.py` | 316L / Cr₂O₃ — the delivery copy, and what the container gate tests |
 
 Resolution order is `$PERMEATION_STUDY` (a path, relative to the repo root), then a
 `study_config.py` in the working directory or a parent. **There is no default** —

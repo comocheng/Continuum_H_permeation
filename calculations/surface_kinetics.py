@@ -126,18 +126,38 @@ def sqrt_P_int_from_theta(theta, alpha, beta, K_eq, P_down):
     return (alpha * g + beta * np.sqrt(P_down)) / (alpha + beta)
 
 
-def smooth_surface_resistance(k_diss_eff, P_up, theta, eps_theta=1e-12, eps_rate=1e-60):
+def surface_resistance(k_diss, K_eq, P_up, theta, eps_theta=1e-12, eps_rate=1e-300):
     r"""
-    Smooth surface resistance with no hard cutoff.
+    Differential resistance of the dissociation step, in the units of 1/α and 1/β.
+
+    The oxide and the metal are linear in :math:`\sqrt{P}`,
+    :math:`J = \alpha\,(g - \sqrt{P_{int}}) = \beta\,(\sqrt{P_{int}} - \sqrt{P_{down}})`,
+    so :math:`1/\alpha` and :math:`1/\beta` are resistances per unit of
+    :math:`\sqrt{P}` [m² s Pa^½ / mol]. The surface delivers the virtual pressure
+    :math:`g(\theta) = \theta/((1-\theta)\sqrt{K_{eq}})` to the layers behind it,
+    and its resistance on the same scale is :math:`-dg/dJ_{surf}`:
 
     .. math::
 
-        R_{surface} \sim \frac{1}{k_{diss} P_{up} (1-\theta)^2}
+        r_{surf} = \frac{dg/d\theta}{-dJ_{surf}/d\theta}
+                 = \frac{1}{2\,k_{diss}\sqrt{K_{eq}}\,(1-\theta)^2
+                          \left[P_{up}(1-\theta) + \theta/K_{eq}\right]}
 
+    With all three resistances in one unit, :math:`r_i/\sum r` is step *i*'s
+    degree of rate control, :math:`\partial\ln J/\partial\ln k_i` (Campbell):
+    scaling :math:`k_{diss}` (at fixed :math:`K_{eq}`), α and β together scales J
+    at fixed θ, so the three fractions sum to exactly 1, and the step with the
+    largest one is the one whose speed-up would raise the flux most.
+
+    The reciprocal of the forward rate, :math:`1/(k_{diss}P_{up}(1-\theta)^2)`,
+    is not a substitute: its units are m² s/mol, not m² s Pa^½/mol, so it cannot
+    be added to 1/α and 1/β. Near equilibrium it is smaller than
+    :math:`r_{surf}` by :math:`\sqrt{P_{up}}/2` (158× at 1 bar).
     """
-    theta_clamped = min(max(theta, 0.0), 1.0 - eps_theta)
-    vacant = max(1.0 - theta_clamped, eps_theta)
-    rate = k_diss_eff * max(P_up, eps_theta) * (vacant ** 2)
+    theta_c = min(max(theta, 0.0), 1.0 - eps_theta)
+    vacant  = max(1.0 - theta_c, eps_theta)
+    rate    = 2.0 * k_diss * np.sqrt(K_eq) * vacant**2 * (max(P_up, 0.0) * vacant
+                                                          + theta_c / K_eq)
     return 1.0 / max(rate, eps_rate)
 
 
@@ -214,7 +234,7 @@ def solve_steady_state_flux_L1L6(P_up, P_down, L_m, k_diss, K_eq, D_m, K_s_m):
     sqrt_P_int = g_theta(theta_ss, K_eq)
     J_ss       = metal_flux_L1(theta_ss, beta, K_eq, P_down)
 
-    R_surface = smooth_surface_resistance(k_diss, P_up, theta_ss)
+    R_surface = surface_resistance(k_diss, K_eq, P_up, theta_ss)
     R_metal   = 1.0 / beta
     R_total   = R_surface + R_metal
 
@@ -292,7 +312,7 @@ def solve_steady_state_flux_L2aL6(P_up, P_down, k_diss, K_eq, D_ox, K_ox, L_ox):
     sqrt_P_surf = g_theta(theta_ss, K_eq)
     J_ss        = oxide_flux_L2a(theta_ss, alpha, K_eq, P_down)
 
-    R_surface = smooth_surface_resistance(k_diss, P_up, theta_ss)
+    R_surface = surface_resistance(k_diss, K_eq, P_up, theta_ss)
     R_oxide   = 1.0 / alpha
     R_total   = R_surface + R_oxide
 
@@ -365,7 +385,7 @@ def solve_steady_state_flux(P_up, P_down, L_m, oxide_name, metal_name, temperatu
     J_surf     = surface_flux(theta_ss, P_up, k_diss, K_eq)
     J_ox       = oxide_flux(theta_ss, alpha, beta, K_eq, P_down)
 
-    R_surface = smooth_surface_resistance(k_diss, P_up, theta_ss)
+    R_surface = surface_resistance(k_diss, K_eq, P_up, theta_ss)
     R_oxide   = 1.0 / alpha
     R_metal   = 1.0 / beta
     R_total   = R_surface + R_oxide + R_metal
@@ -448,7 +468,7 @@ def solve_steady_state_flux_direct(P_up, P_down, L_m, k_diss, K_eq,
     J_surf     = surface_flux(theta_ss, P_up, k_diss, K_eq)
     J_ox       = oxide_flux(theta_ss, alpha, beta, K_eq, P_down)
 
-    R_surface = smooth_surface_resistance(k_diss, P_up, theta_ss)
+    R_surface = surface_resistance(k_diss, K_eq, P_up, theta_ss)
     R_oxide   = 1.0 / alpha
     R_metal   = 1.0 / beta
     R_total   = R_surface + R_oxide + R_metal
@@ -664,7 +684,7 @@ def calculate_path_flux_L6(
             J_ss       = beta * (sqrt_P_int - sqrt_P_down)
             J_surf     = surface_flux(theta_ss, P_up, k_diss_eff, K_eq_eff)
             J_ox       = np.nan
-            R_surface  = smooth_surface_resistance(k_diss_eff, P_up, theta_ss)
+            R_surface  = surface_resistance(k_diss_eff, K_eq_eff, P_up, theta_ss)
             R_oxide    = 0.0
             R_metal    = 1.0 / beta
             R_total    = R_surface + R_metal
@@ -717,7 +737,7 @@ def calculate_path_flux_L6(
     J_surf     = surface_flux(theta_ss, P_up, k_diss, K_eq)
     J_ox       = oxide_flux(theta_ss, alpha, beta, K_eq, P_down)
 
-    R_surface = smooth_surface_resistance(k_diss, P_up, theta_ss)
+    R_surface = surface_resistance(k_diss, K_eq, P_up, theta_ss)
     R_oxide   = 1.0 / alpha
     R_metal   = 1.0 / beta
     R_total   = R_surface + R_oxide + R_metal
@@ -1128,14 +1148,14 @@ def calculate_path_flux_L346_v2(
         J_surface    = surface_flux(theta_ss, P_up, k_diss_eff, K_eq_eff)
         J_oxide      = np.nan
         R_oxide      = 0.0
-        R_surface    = smooth_surface_resistance(k_diss_eff, P_up, theta_ss)
+        R_surface    = surface_resistance(k_diss_eff, K_eq_eff, P_up, theta_ss)
         alpha_out    = np.inf
         kinetics_used = 'metal'
     else:
         J_surface    = surface_flux(theta_ss, P_up, k_diss, K_eq)
         J_oxide      = oxide_flux(theta_ss, alpha, beta_eff, K_eq, P_down)
         R_oxide      = 1.0 / alpha
-        R_surface    = smooth_surface_resistance(k_diss, P_up, theta_ss)
+        R_surface    = surface_resistance(k_diss, K_eq, P_up, theta_ss)
         alpha_out    = alpha
         kinetics_used = 'oxide'
 

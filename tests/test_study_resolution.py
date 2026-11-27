@@ -53,13 +53,12 @@ def test_known_studies_still_hold_the_material_they_should(folder, study_name, m
 
 
 def test_study_name_is_declared_by_the_file_not_the_folder():
-    """Application/ holds a copy of the 316L study and must report the 316L name.
+    """Guo_etal_2025/ declares STUDY_NAME 'Guo_etal_2025_316L', not its folder name.
 
-    Deriving the label from the folder would name it 'Application', and the container
-    gate — which selects its reference set on ACTIVE_STUDY_NAME — would fail to find
-    one for the study it actually ships.
+    The container gate selects its reference set on ACTIVE_STUDY_NAME, so a label
+    derived from the folder would change whenever a folder was renamed or copied.
     """
-    assert resolved(cwd=ROOT / "Application")["name"] == "Guo_etal_2025_316L"
+    assert resolved(cwd=ROOT / "Guo_etal_2025")["name"] == "Guo_etal_2025_316L"
 
 
 def test_a_subdirectory_inherits_the_parent_folders_study():

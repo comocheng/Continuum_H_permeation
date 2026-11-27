@@ -68,12 +68,11 @@ values see {doc}`../PARAMETERS`, which is generated against the active study.
 | `Guo_etal_2025/` | `Guo_etal_2025_316L` | 316L / Cr₂O₃ |
 | `Fuerst_et_al_2024/` | `fuerst_etal_2024_model_config` | Hastelloy N / Cr₂O₃ |
 | `incoloy802_cr2o3/` | `incoloy802_cr2o3` | Incoloy 802 (X40 NiCrAlTi 31/19) / Cr₂O₃ |
-| `Application/` | `Guo_etal_2025_316L` | 316L / Cr₂O₃ — the delivery copy, and what the container gate tests |
 
 The files are structurally identical and define the same interface; they differ only
 in their values. `STUDY_NAME` is declared by the file rather than taken from the folder,
-so renaming a folder cannot silently relabel a result — and `Application/` reports the
-316L study it holds a copy of, which is why its reference set resolves.
+so renaming or copying a folder cannot silently relabel a result, or lose the container
+gate's reference set for it.
 
 Because a study is a file outside the package, it is not importable by a dotted name and
 is not documented by autodoc here. For its structure and the meaning of every block, see

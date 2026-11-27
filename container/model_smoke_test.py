@@ -319,7 +319,19 @@ print("\nshipped SA artefacts:")
 # this block will assert Application's numbers against Guo's data. Re-measure then;
 # failing loudly is the intent, as with a missing REFERENCE entry.
 R = os.path.join(os.path.dirname(ACTIVE_STUDY_PATH), "sa_results")
-needed = ["routeB_givendata.csv", "master_clusters.csv", "compare_delta_flux.csv"]
+# The isothermal notebooks write one comparison per temperature
+# (compare_delta_flux_T<K>.csv) and tag routeB/master rows with temperature_K;
+# only the older Application/ notebooks write the untagged compare_delta_flux.csv.
+# Use the untagged file when present, else the hottest temperature's.
+import glob as _glob
+_T_SA = None
+_cmp = os.path.join(R, "compare_delta_flux.csv")
+if not os.path.exists(_cmp):
+    _tagged = _glob.glob(os.path.join(R, "compare_delta_flux_T*.csv"))
+    if _tagged:
+        _T_SA = max(int(os.path.basename(f)[len("compare_delta_flux_T"):-4]) for f in _tagged)
+        _cmp = os.path.join(R, f"compare_delta_flux_T{_T_SA}.csv")
+needed = ["routeB_givendata.csv", "master_clusters.csv", _cmp]
 if not all(os.path.exists(os.path.join(R, f)) for f in needed):
     # Expected for the shipped workspace: the SA result CSVs are deliberately
     # not distributed (see PACKAGING_1.0.0.md), so this section only runs in the
@@ -337,7 +349,10 @@ else:
     )
     rb = pd.read_csv(os.path.join(R, "routeB_givendata.csv"))
     mc = pd.read_csv(os.path.join(R, "master_clusters.csv"))
-    cf = pd.read_csv(os.path.join(R, "compare_delta_flux.csv"))
+    cf = pd.read_csv(_cmp)
+    if _T_SA is not None:
+        rb = rb[rb["temperature_K"] == _T_SA]
+        mc = mc[mc["temperature_K"] == _T_SA]
     # The CSV shapes and driver rankings pinned here were measured on a scan that
     # still sampled nine trapping inputs, which no longer exist. Re-measure them from
     # the first scan made without trapping; until then only the figures are checked.

@@ -95,6 +95,36 @@ def flux_balance_equation(P_interface, P_upstream, P_downstream, oxide_props, me
 
 # Handle edge case where upstream pressure is too low
 min_pressure = 1e-20  # Minimum meaningful pressure
+def _interface_closed_form(P_upstream, P_downstream, oxide_props, metal_props):
+    r"""Exact oxide/metal interface pressure and flux (Henry oxide, Sieverts metal).
+
+    With :math:`a = D_{ox}K_{ox}/L_{ox}`, :math:`b = D_mK_s/L_m` and
+    :math:`u = \sqrt{P_{int}} - \sqrt{P_{down}}`, the flux balance
+    :math:`a(P_{up} - P_{int}) = b\,u` is a quadratic in u,
+    :math:`a u^2 + \beta u - a\Delta P = 0` with :math:`\beta = b + 2a\sqrt{P_{down}}`
+    and :math:`\Delta P = P_{up} - P_{down}`, whose positive root is written in the
+    cancellation-free form
+
+    .. math::
+
+        u = \frac{2a\Delta P}{\beta + \sqrt{\beta^2 + 4a^2\Delta P}}
+
+    Solving for u rather than :math:`\sqrt{P_{int}}` keeps the flux :math:`J = b\,u`
+    accurate when the interface sits next to P_downstream (oxide-dominated), where
+    :math:`\sqrt{P_{int}} - \sqrt{P_{down}}` would cancel.
+
+    Used where brentq cannot bracket, i.e. when the root lies within 1e-10 of
+    P_downstream or P_upstream. Returns ``(P_interface, flux)``.
+    """
+    a = oxide_props['D_ox'] * oxide_props['K_ox'] / oxide_props['thickness']
+    b = metal_props['D_metal'] * metal_props['K_s_metal'] / metal_props['thickness']
+    s_d = np.sqrt(max(P_downstream, 0.0))
+    dP = P_upstream - max(P_downstream, 0.0)
+    beta = b + 2.0 * a * s_d
+    u = 2.0 * a * dP / (beta + np.sqrt(beta * beta + 4.0 * a * a * dP))
+    return float((s_d + u) ** 2), float(b * u)
+
+
 def solve_interface_pressure(P_upstream, P_downstream, oxide_props, metal_props, method='brentq'):
     """
     Solve for interface pressure where oxide and metal fluxes match.
@@ -159,24 +189,32 @@ def solve_interface_pressure(P_upstream, P_downstream, oxide_props, metal_props,
             'P_interface_normalized': (P_interface - P_downstream) / max(P_upstream - P_downstream, min_pressure)
         }
     
+    fallback = False
     try:
         # Check if the function has different signs at boundaries
         f_min = flux_balance_equation(P_min, P_upstream, P_downstream, oxide_props, metal_props)
         f_max = flux_balance_equation(P_max, P_upstream, P_downstream, oxide_props, metal_props)
         
         if f_min * f_max > 0:
-            # Same sign at boundaries - no solution in this interval
-            # This typically means oxide is completely dominant
-            P_interface = P_min  # Interface pressure drops to minimum
+            # Same sign at both ends: the root lies within 1e-10 * P_upstream of a
+            # physical limit, outside the bracket. The root may be at either limit
+            # (oxide-dominated: near P_downstream; metal-dominated: near
+            # P_upstream), so take the exact root; see _interface_closed_form.
+            P_interface, flux_fallback = _interface_closed_form(
+                P_upstream, P_downstream, oxide_props, metal_props)
             converged = False
+            fallback = True
         else:
             if method == 'brentq':
                 # Brent's method - robust and fast
+                # xtol is ABSOLUTE, in Pa, and the root can be far below 1 Pa
+                # (near 1e-14 Pa at P_up = 1e-6 Pa). Every root is >= P_min, so an
+                # xtol far below P_min leaves rtol in charge at every pressure.
                 P_interface = brentq(
                     flux_balance_equation,
                     P_min, P_max,
                     args=(P_upstream, P_downstream, oxide_props, metal_props),
-                    xtol=1e-12,
+                    xtol=P_min * 1e-6,
                     rtol=1e-12
                 )
                 converged = True
@@ -195,19 +233,24 @@ def solve_interface_pressure(P_upstream, P_downstream, oxide_props, metal_props,
                 raise ValueError(f"Unknown method: {method}")
             
     except (ValueError, RuntimeError) as e:
-        # If solver fails, use approximation
-        # For oxide-dominated case, interface pressure is very low
-        P_interface = P_min
+        P_interface, flux_fallback = _interface_closed_form(
+            P_upstream, P_downstream, oxide_props, metal_props)
         converged = False
+        fallback = True
     
-    # Calculate actual flux at solution
-    flux = molecular_diffusion_flux(
-        oxide_props['D_ox'],
-        oxide_props['K_ox'],
-        oxide_props['thickness'],
-        P_upstream,
-        P_interface
-    )
+    # Calculate actual flux at solution. On the fallback the interface sits within
+    # 1e-10 of a limit, where either pressure difference is a difference of nearly
+    # equal numbers, so use the flux the closed form computes without one.
+    if fallback:
+        flux = flux_fallback
+    else:
+        flux = molecular_diffusion_flux(
+            oxide_props['D_ox'],
+            oxide_props['K_ox'],
+            oxide_props['thickness'],
+            P_upstream,
+            P_interface
+        )
     
     # Verify flux continuity (only if we have a valid solution)
     if P_interface > 0:

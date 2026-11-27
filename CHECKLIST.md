@@ -68,10 +68,17 @@ overrides the geometry.
 
 ## Known defects, not yet scheduled
 
-- [ ] **Four SA defaults lie outside their own sweep ranges** — `D_ref`,
+- [x] **Four SA defaults lie outside their own sweep ranges** — `D_ref`,
       `k_diss_metal_ref`, `E_diss_metal`, in the 316L study only. The sensitivity analysis
       therefore never evaluates the nominal case for those parameters. Either the default
       or the range is wrong; `check_against_config()` has reported this for some time.
+      **Fixed: the ranges were wrong.** They were Incoloy 802's (the comment said so),
+      copied into the 316L study and its `Application/` copy. `D_ref` and
+      `k_diss_metal_ref` are now +/- 2 decades about the 316L defaults, as the other
+      studies do for theirs, and `E_D` / `E_diss_metal` +/- 15 kJ/mol. The two preset
+      overrides that hard-coded Incoloy numbers (`_SA_FAST_METAL` `D_ref`,
+      `_SA_SLOW_SURFACE` `k_diss_metal_ref`) moved with them. `check_against_config()`
+      is clean on all four studies.
 - [x] **`REQUIRED_EXPORTS` was incomplete — five names, not one.** It omitted
       `get_surface_kinetics_from_config` (imported at module level by
       `surface_kinetics.py`), plus `R`, `F`, `apply_style` and
@@ -130,12 +137,15 @@ overrides the geometry.
       Changes no number: the gate passes unchanged on all four studies and
       `worked_values --check` is clean. `pressure_range` is left alone — nothing reads it
       for either material, so renaming it would be churn without a consumer.
-- [ ] **The preset yields quoted in `study_config.py` are stale.** The comment above
+- [x] **The preset yields quoted in `study_config.py` are stale.** The comment above
       `REGIME_PRESETS_L5` claims `metal 97.0%, oxide 77.7%, defect 87.3%`; measured today
       they are 34%, 78%, 100% (150 draws, seed 42). Unchanged by the geometry fix —
       verified by probing before and after — so the comment simply predates other work.
       `size_draws_for_target()` measures yields at run time, so nothing depends on the
       comment being right, but it reads as authoritative.
+      **Closed 2026-11-26:** the numbers are no longer in any `study_config.py`. Measured
+      yields are printed by the SA notebooks (Phase 1); under log-uniform sampling they
+      are e.g. 316L L5 oxide 54-67%, metal 38-65%, defect 76-95%.
 - [ ] **Oxide properties are extrapolated ~500 K past their validated ceiling, silently.**
       The Cr₂O₃ data carry `temperature_range = [473, 773]` K; the SA sweeps to 1273 K.
       `get_oxide_properties_at_T` warns, but the level-5 wrappers — the ones the SA
@@ -162,6 +172,107 @@ overrides the geometry.
       regimes unchanged (L5 metal, L5L6 oxide). The gate was re-baselined and the pinned
       SA rankings, which named trap inputs, dropped until the next scan. The argument is
       written up in `STEADY_STATE.md`, which replaces `TRAPPING_VALIDATION.md`.
+
+## Sensitivity-analysis design (PI review, 2026-11-25)
+
+- [x] **Scale parameters were sampled uniformly in linear space over ranges of up to
+      fourteen decades.** `f_pinhole` in [1e-5, 0.1] put 99.9% of draws above 1e-4,
+      `P_upstream` in [1e-7, 1e7] Pa put 99.99999% above 1 Pa, and so on for every
+      pre-exponential, thickness and area fraction. The indices described the top
+      decade of each range only.
+      **Fixed:** `lhs_sample` lays the hypercube out in log10 for every positive scale
+      quantity and maps it back; energies, heats and temperature, which already sit in
+      an exponent, stay linear (`LINEAR_SAMPLED_PARAMS`). New inputs default to log, and
+      a log range reaching zero is refused. The analysis side needs no change: PAWN
+      slices on quantiles and delta on ranks, so both are invariant to the transform.
+
+- [x] **The regime fractions compared resistances in different units.** The SA strata
+      are `argmax` of the resistance fractions, so the fractions decide which cluster a
+      sample lands in. Two of them were wrong:
+      - **L5L6 surface.** `R_surface = 1/(k_diss P (1-theta)^2)` is in m2 s/mol; `1/alpha`
+        and `1/beta` are in m2 s Pa^0.5/mol. Near equilibrium the surface was
+        under-weighted by sqrt(P)/2 (158x at 1 bar) and over-weighted ~6000x at 1e-7 Pa.
+        The docs' own example, a surface that cuts the 316L flux 9.2x, read as 2.78%
+        surface.
+      - **L5 oxide/metal.** The split was the linear pressure drop across the oxide,
+        while the metal runs on sqrt(P), which leaned labels towards `oxide` (review
+        item 6): at P_int = 0.4 P_up it said 60% oxide where speeding up the metal
+        raises the flux more.
+
+      **Fixed:** every fraction is now a degree of rate control,
+      X_i = d ln J / d ln k_i, computed from differential resistances in one unit
+      (`surface_resistance`, `series_rate_control_L5`). The fractions sum to 1 and
+      `tests/test_rate_control.py` checks each one against a finite-difference X_i. The
+      L5 split now matches Figure 7, which already used the differential metal
+      resistance. The 316L default point keeps its labels (L5 metal, L5L6 oxide); the
+      docs example is now 46% surface / 54% metal. The gate is unchanged.
+
+- [x] **The Level 2b interface solve failed at the edges the SA samples.** Two bugs,
+      both reported as at most `converged=False` and usually not at all:
+      - brentq's `xtol=1e-12` is absolute, in Pa. Below ~1e-3 Pa upstream the interface
+        pressure is smaller than that, so brentq stopped at the bracket edge and returned
+        `converged=True` with up to ~95% flux imbalance.
+      - When the root lay outside the bracket (within 1e-10 of a limit) the fallback
+        always took `P_min`, the oxide-dominated limit. On a metal-dominated wall (1 nm
+        oxide, 1e7 Pa) that returned 3e3 mol/m2/s for a wall that passes 3e-8.
+
+      **Fixed:** `xtol` scales with the bracket, and the fallback uses the exact root of
+      the quadratic in sqrt(P_int), taking the flux from the well-conditioned metal side.
+      In a 6000-draw log-uniform L5 scan, 15 rows had been wrong by up to 11.8 decades
+      and had changed regime. `tests/test_interface_solver.py`; the gate is unchanged.
+
+- [x] **SA failures were masked (review item 5).** Both wrappers caught every exception,
+      printed a traceback and returned `flux = 1e-20`, i.e. -20 on the log10 scale the
+      indices use; the row was then dropped from the clusters without a count. In L5L6 a
+      NaN path flux made `J_total` NaN and every flux weight 0, and `argmax(0, 0, 0)`
+      labelled the row `surface`.
+      **Fixed:** a failure returns NaN outputs, `regime='undefined'` and an `error`
+      message, and warns. A non-finite total flux is a failure. `run_global_lhs_scan`
+      records the `error` column and always prints a failure count with the commonest
+      messages. On the current presets and log-uniform ranges no draw fails.
+      `tests/test_sa_failures.py`.
+
+- [x] **The GB enhancement ignored the sampled `E_D` (review item 7).**
+      `gb_enhancement_factor` read `METALS[...]['E_D']`, so on every SA draw the lattice
+      diffusivity used the sampled `E_D` and the grain-boundary term used the config's.
+      **Fixed:** `Q_bulk` is an optional override, passed through `metal_diffusivity` in
+      `microstructure_params`, and both wrappers pass the sampled `E_D`. No pinned
+      number moves. With LAGB boundaries the enhancement is clamped to ~1x, so in the
+      shipped studies this changes almost nothing; that is a separate microstructure
+      question (the 316L and Incoloy values are copied from Hastelloy N).
+
+- [x] **The SA design overstated what its indices resolve (review item 11).**
+      - The delta noise floor was ~0.09 at 1500-row clusters, so many rankings sat inside
+        it. delta's floor barely shrinks with n (KDE bias); PAWN's falls as ~1/sqrt(n)
+        but had no floor computed at all.
+      - The L5 notebook used 3 dummies and L5L6 used 20. The floor is a max over dummies,
+        so the two floors were not comparable.
+      - The clusters are selected on the output, so every index is regional (conditional
+        on preset and regime, with inputs made dependent by the selection). Nothing said so.
+
+      **Done:** a PAWN floor (`floor_pawn`, `pawn_over_floor`) alongside delta's; 20
+      dummies everywhere; `TARGET_CLUSTER_SIZE` 1500 -> 5000, which halves the PAWN
+      floor. The notebooks and docs state the regional reading, and a new Phase 4 repeats
+      the indices on each preset's full scan (`routeB_presetwide.csv`) to show what the
+      selection contributes. Scans carry a `SCAN_VERSION` in their stamp, and the
+      notebook cache refuses older ones.
+
+- [x] **delta for `theta` came out at 60-3000 (PR #2 review).** delta is bounded in
+      [0, 1]. `theta` was analysed linearly, but it spans about 15 decades below 0.1 in the
+      surface cluster and 1e-12 to 0.99 in the metal cluster, so its KDE is a spike narrower
+      than the 100-point grid delta integrates on. Only theta in the surface and metal
+      clusters was affected, but those numbers were reported as rankings.
+      **Fixed:** theta is analysed as log10(theta/(1-theta)) (`LOGIT_METRICS_DEFAULT`),
+      which brings every delta into range and the surface/theta floor from ~0.4 to ~0.07.
+      Any entry whose delta still exceeds 1 is set to NaN with a warning.
+
+- [x] **The SA ran serially, for hours per notebook.** Every model evaluation and every
+      (regime, metric) PAWN/delta call ran one at a time, and delta dominates, at about
+      30 s per (regime, metric) at 1500 rows.
+      **Done:** both stages run in a spawn-based process pool (`n_jobs`, default every
+      CPU or `$PERMEATION_N_JOBS`). Workers are pinned to the parent's study. Each SALib
+      call seeds itself, so results are identical to serial
+      (`tests/test_sa_parallel.py`, marked slow).
 
 ## Test coverage
 
@@ -221,7 +332,7 @@ overrides the geometry.
 
 ## Repository hygiene
 
-- [ ] **The Guo SA notebooks' stored outputs predate the geometry re-baseline.** Merging
+- [x] **The Guo SA notebooks' stored outputs predate the geometry re-baseline.** Merging
       `fix/eta-surf-not-default` brought re-executed copies of `sensitivity_regime_L5`,
       `sensitivity_regime_L5L6` and both `regime_parallel_coords*`, but that branch forked
       at `0c264dd`, before `acfe540` made `CONDITIONS` own the oxide geometry — so they
@@ -231,6 +342,12 @@ overrides the geometry.
       The committed outputs are now stale in both copies and a correct set needs a real
       re-execution, which is hours per notebook — the L5L6 773 K oxide preset alone draws
       >100k samples.
+      **Done 2026-11-26** on branch `sensitivity-analysis`: `sensitivity_regime_L5` and
+      `_L5L6` re-run in `Guo_etal_2025/`, `Fuerst_et_al_2024/` and `incoloy802_cr2o3/`
+      (which also replaces the Fuerst and Incoloy copies that held another study's
+      outputs), ~16-20 min each with the parallel SA. The `regime_parallel_coords*`
+      notebooks ran cleanly and stay committed without outputs. `Application/`, a stale
+      copy of the Guo study, was deleted on 2026-11-27.
 
 - [x] **`docs/two-models` is unmerged**, 8 commits ahead of `main`, and edits two of the
       same documentation pages as the current branch — `docs/api/config.md` and

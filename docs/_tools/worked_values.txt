@@ -81,8 +81,8 @@ L_metal/L_oxide  0.001 / 1e-06 m
   flux_defect                8.652956e-08
   flux_intact                4.218224e-06
   frac_defect                2.010093e-02
-  frac_metal                 9.693590e-01
-  frac_oxide                 1.054009e-02
+  frac_metal                 9.746005e-01
+  frac_oxide                 5.298543e-03
   modification_factor        1.000011e+00
   permeability               1.362644e-11
   permeance                  1.361283e-08
@@ -105,9 +105,9 @@ L_metal/L_oxide  0.001 / 1e-06 m
   flux                       9.860237e-07
   flux_defect                4.028123e-08
   flux_intact                9.457425e-07
-  frac_metal                 2.497421e-01
-  frac_oxide                 7.500306e-01
-  frac_surface               2.273203e-04
+  frac_metal                 2.422405e-01
+  frac_oxide                 7.391910e-01
+  frac_surface               1.856848e-02
   k_diss                     2.370190e-09
   k_diss_metal               2.498430e-10
   permeability               3.121199e-12

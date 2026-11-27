@@ -16,7 +16,7 @@ comparison to make.
 
 | | |
 |---|---|
-| **Inputs** | `REGIME_PRESETS` / `REGIME_PRESETS_L5`, `target_cluster=1500`, `probe_n=250`, `safety=1.15`, `n_max=200000` |
+| **Inputs** | `REGIME_PRESETS` / `REGIME_PRESETS_L5`, `target_cluster=5000`, `probe_n=250`, `safety=1.15`, `n_max=200000` |
 | **Outputs** | `{regime: n_draws}`, then `scan_<regime>.csv` per regime |
 | **Code** | [`size_draws_for_target`](../api/sensitivity), `run_targeted_regime_scans`, `load_regime_scans` |
 | **Cost** | A probe of 250 draws per regime — about 15% — then the real scans |

@@ -729,7 +729,7 @@ def test_oxide_extrapolation_still_warns(capsys):
 def test_the_shipped_config_has_no_preset_pinning_a_missing_parameter():
     """Scoped to THIS check, not to check_against_config as a whole.
 
-    Guo_etal_2025 and Application report four problems from a different check --
+    Guo_etal_2025 reports four problems from a different check --
     D_ref, k_diss_metal_ref and E_diss_metal each sit outside their own sweep range,
     so the SA never samples them at their nominal value. Those predate this guard
     (identical on main) and are a range decision, not a naming one, so they are not
