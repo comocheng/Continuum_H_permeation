@@ -219,10 +219,6 @@ while carrying 46% of the rate control, a hair less than the metal's 54%, so
 `rate_limiting` reads `metal`. Both statements are true: the surface and the metal
 are similarly slow, and removing the surface step altogether would help a lot.
 
-(Before 2026-11-26 the same wall reported 2.78% surface. The surface resistance was
-then $1/(k_{diss}P_{up}(1-\theta)^2)$, in different units from $1/\alpha$ and
-$1/\beta$; see `surface_resistance` in `calculations.surface_kinetics`.)
-
 If you want the global cost of surface kinetics, compare fluxes with and without
 them, or inspect $\theta$ against $\theta_{eq}$, or read `eta_surf`.
 `permeability` is derived from the same flux, so it moves with the surface only as

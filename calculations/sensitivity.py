@@ -310,11 +310,11 @@ def series_rate_control_L5(P_up, P_int, P_down=0.0):
         \qquad a = D_{ox}K_{ox}/L_{ox},\; b = D_m K_s/L_m
 
     The fraction of the *pressure* dropped across the oxide,
-    :math:`(P_{up}-P_{int})/P_{up}`, used to stand in for the oxide's share of the
-    resistance. It compares a linear drop with a square-root one and so leans
-    towards the oxide: at :math:`P_{int} = 0.4\,P_{up}` it calls the wall 60%
-    oxide-limited, although raising the metal's permeance would raise the flux
-    more than raising the oxide's.
+    :math:`(P_{up}-P_{int})/P_{up}`, is not the oxide's share of the resistance.
+    It compares a linear drop with a square-root one and so leans towards the
+    oxide: at :math:`P_{int} = 0.4\,P_{up}` it would call the wall 60%
+    oxide-limited, although raising the metal's permeance raises the flux more
+    than raising the oxide's.
 
     The quantity that answers "which layer limits the flux" is the degree of rate
     control (Campbell), :math:`X_i = \partial\ln J/\partial\ln k_i`. Scaling both

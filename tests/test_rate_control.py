@@ -4,8 +4,9 @@ A regime label answers "which step limits the flux". The quantity that answers i
 the degree of rate control X_i = d ln J / d ln k_i (Campbell): how much the flux
 rises when step i alone is made faster. These tests check every fraction the regime
 labels are built from against a finite-difference X_i, so a fraction computed in
-inconsistent units -- as the surface fraction was, and the L5 oxide/metal split in a
-milder way -- fails here rather than silently relabelling SA clusters.
+inconsistent units (for example a surface resistance not on the sqrt(P) scale of the
+layers, or an L5 split taken from the linear pressure drop) fails here rather than
+silently relabelling SA clusters.
 """
 import numpy as np
 import pytest
@@ -83,9 +84,8 @@ def test_pinhole_path_surface_fraction_is_rate_control():
 def test_surface_that_costs_a_factor_of_nine_is_not_reported_as_minor():
     """The docs' worked example: a surface that cuts the 316L flux ninefold.
 
-    With the old reciprocal-forward-rate resistance it read as 2.8% surface and
-    rate_limiting='metal'. If the surface costs a factor of 9, making it faster is
-    what raises the flux, so it must carry most of the rate control.
+    If the surface costs a factor of 9, making it faster is what raises the flux,
+    so it must carry most of the rate control.
     """
     P_up, k, K = 1e5, 3e-12, 1e-4
     r = solve_steady_state_flux_L1L6(P_up, 0.0, L_M, k, K, D_M, K_S)
@@ -102,7 +102,7 @@ def test_L5_series_split_closed_form(ratio):
 
 
 def test_L5_layers_hand_over_at_a_third_not_a_half():
-    # The linear pressure drop said 'oxide' anywhere P_int < P_up/2.
+    # The linear pressure-drop share would say 'oxide' anywhere P_int < P_up/2.
     assert series_rate_control_L5(1e5, 0.4e5) < 0.5
     assert series_rate_control_L5(1e5, 1e5 / 3) == pytest.approx(0.5)
 

@@ -135,8 +135,7 @@ $$X_{ox} = \frac{P_{up} - P_{int}}{P_{up} + P_{int}},$$
 and the layers hand over at $P_{int} = P_{up}/3$, not $P_{up}/2$. The metal's
 differential resistance here is the $2L\sqrt{P}/(DK_s)$ form of
 `calculate_metal_resistance`, evaluated at the solved interface pressure, where
-it is exact. (Before 2026-11-26 the split was the linear pressure drop, which
-leaned the labels towards `oxide`.) Level 2b's `resistance_ratio` evaluates that
+it is exact. Level 2b's `resistance_ratio` evaluates that
 form at the upstream pressure instead, so the two diagnostics should not be
 expected to agree numerically.
 ```

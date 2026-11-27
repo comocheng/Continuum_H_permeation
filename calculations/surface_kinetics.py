@@ -149,13 +149,10 @@ def surface_resistance(k_diss, K_eq, P_up, theta, eps_theta=1e-12, eps_rate=1e-3
     at fixed θ, so the three fractions sum to exactly 1, and the step with the
     largest one is the one whose speed-up would raise the flux most.
 
-    This replaces :math:`1/(k_{diss}P_{up}(1-\theta)^2)`, the reciprocal of the
-    forward rate. That has units of m² s/mol, not m² s Pa^½/mol, so adding it to
-    1/α and 1/β compared quantities in different units: near equilibrium it is
-    smaller than :math:`r_{surf}` by :math:`\sqrt{P_{up}}/2` — 158× at 1 bar —
-    and larger by ~6000× at 1e-7 Pa. The 316L bare-metal wall with surface
-    kinetics loses a factor 9 in flux to the surface but was reported as 2.8%
-    surface-limited.
+    The reciprocal of the forward rate, :math:`1/(k_{diss}P_{up}(1-\theta)^2)`,
+    is not a substitute: its units are m² s/mol, not m² s Pa^½/mol, so it cannot
+    be added to 1/α and 1/β. Near equilibrium it is smaller than
+    :math:`r_{surf}` by :math:`\sqrt{P_{up}}/2` (158× at 1 bar).
     """
     theta_c = min(max(theta, 0.0), 1.0 - eps_theta)
     vacant  = max(1.0 - theta_c, eps_theta)
