@@ -42,6 +42,7 @@ for.
 |---|---|---|
 | Understand what the model is for | {doc}`overview` | {doc}`theory/two-models` |
 | Run something today | {doc}`getting-started` | {doc}`how-to/switch-study` |
+| Read a temperature, pressure, thickness or pinhole sweep | {doc}`how-to/parameter-sweeps` | {doc}`theory/permeability` |
 | Understand the physics properly | {doc}`theory/foundations` | the level chapters, in order |
 | Look up one equation | {doc}`theory/equations` | the level chapter that derives it |
 | Know which parameters matter | {doc}`sensitivity/index` | stages 1–5 in order |
@@ -124,6 +125,7 @@ getting-started
 
 how-to/switch-study
 how-to/sensitivity-analysis
+how-to/parameter-sweeps
 CONTAINER
 ```
 
@@ -136,6 +138,7 @@ theory/foundations
 theory/equilibrium-models
 STEADY_STATE
 theory/equations
+Surface, subsurface and bulk hydrogen <surface_subsurface/THEORY>
 ```
 
 ```{toctree}
