@@ -13,7 +13,7 @@ Level 1  — Perfect metal (bulk diffusion + Sieverts solubility)
 Level 2a — Perfect oxide layer on metal
 Level 2b — Oxide + metal in series
 Level 3  — Defective oxide (pinholes, cracks, grain boundaries)
-Level 4  — Defective metal (grain boundary enhancement, trapping)
+Level 4  — Defective metal (grain boundary enhancement)
 Level 5  — Full system: defective oxide + defective metal
 Level 6  — Surface kinetics: dissociation / recombination (Langmuir coverage)
 ```
@@ -38,17 +38,16 @@ Entry points are the six notebooks each study folder carries; `Guo_etal_2025/` i
 
 | Notebook | What it does |
 |---|---|
-| `Proposal.ipynb` | Main walkthrough — Levels 1 through 5 (bulk transport, defective oxide, trapping) |
+| `Proposal.ipynb` | Main walkthrough — Levels 1 through 5 (bulk transport, defective oxide, grain boundaries) |
 | `Surface_proposal.ipynb` | Adds Level 6 surface kinetics (dissociation, Langmuir coverage) |
 | `sensitivity_regime_L5L6.ipynb` | Regime-stratified SA, Level 5L6 — regimes surface / oxide / metal |
 | `sensitivity_regime_L5.ipynb` | Regime-stratified SA, Level 5 — regimes oxide / metal / defect |
 | `regime_parallel_coords.ipynb` | Parallel-coordinates views of the L5L6 regime clusters |
 | `regime_parallel_coords_L5.ipynb` | Same, for the Level 5 clusters |
 
-`Application/` is the working copy. `Guo_etal_2025/`, `Fuerst_et_al_2024/` and
-`incoloy802_cr2o3/` hold the same six notebooks as run against each study, with
-outputs committed. Each of the four also holds the `study_config.py` its notebooks
-run on.
+`Guo_etal_2025/`, `Fuerst_et_al_2024/` and `incoloy802_cr2o3/` hold the same six
+notebooks as run against each study, with outputs committed. Each also holds the
+`study_config.py` its notebooks run on.
 
 Those three study folders also carry four **parameter sweeps**, which run every level
 of both models over one parameter and fit the result per regime:
@@ -94,6 +93,24 @@ the documentation pages used. `--run-notebooks` writes the executed copies to
 `calculations/report_text.py`; a renamed docs page or heading fails
 `tests/test_report.py`. Needs LaTeX (`latexmk`, `pdflatex`).
 
+### Once per clone: commit notebooks without their outputs
+
+The `effect-of-*.ipynb` sweep notebooks in each study folder and
+`Comparisons/study-comparison.ipynb` are committed **without outputs**. With outputs they
+run 4–25 MB each, and every re-run would add that to the history again. Your working
+copies keep their outputs; only the committed copy is stripped, by a git clean filter
+(`tools/strip_notebook_outputs.py`, standard library only). `.gitattributes` names the
+notebooks and `.gitconfig` defines the filter, but git never runs a command from a
+repository's own files, so each clone has to opt in once, from the repository root:
+
+```bash
+git config --local include.path ../.gitconfig
+```
+
+Without this, `git add` commits the outputs, and `tests/test_committed_notebooks.py`
+fails until you enable the filter and re-add the notebook. To strip a notebook that was
+added before you enabled the filter, run `git add --renormalize <notebook>`.
+
 ---
 
 ## Repository Structure
@@ -103,7 +120,7 @@ calculations/           Physics modules
   permeation_calc.py      Sieverts/diffusion core (Levels 1–2)
   oxide_permeation.py     Oxide molecular transport (Levels 2–3)
   parallel_oxide_defect_paths.py  Parallel-path assembly (Level 3)
-  defective_metal.py      Grain boundary enhancement + Oriani trapping (Level 4)
+  defective_metal.py      Grain boundary enhancement (Level 4)
   interface_solver.py     Oxide–metal interface pressure solve
   surface_kinetics.py     Dissociation kinetics (Level 6)
   classify_regime.py      Hierarchical regime labels (Levels 1–4)
@@ -116,9 +133,8 @@ calculations/           Physics modules
     model_config.py       Loads the one active study — see Configuration below
     __init__.py           Where studies live, and the add-a-study recipe
 
-Application/            Notebooks + study_config.py (working copy, and what ships)
-  <Notebook>-results/     Figures from that notebook, one folder each
 Guo_etal_2025/          One folder per study: its notebooks AND its input file
+  <Notebook>-results/     Figures from that notebook, one folder each
 Fuerst_et_al_2024/
 incoloy802_cr2o3/
 
@@ -143,7 +159,6 @@ that folder's study. There is no switch to edit.
 | `Guo_etal_2025/` | `study_config.py` | 316L / Cr₂O₃ |
 | `Fuerst_et_al_2024/` | `study_config.py` | Hastelloy N / Cr₂O₃ |
 | `incoloy802_cr2o3/` | `study_config.py` | Incoloy 802 (X40 NiCrAlTi 31/19) / Cr₂O₃ |
-| `Application/` | `study_config.py` | 316L / Cr₂O₃ — the delivery copy, and what the container gate tests |
 
 Resolution order is `$PERMEATION_STUDY` (a path, relative to the repo root), then a
 `study_config.py` in the working directory or a parent. **There is no default** —
@@ -182,7 +197,6 @@ notebooks and a `study_config.py` in it — is documented in
 | [PARAMETERS.md](PARAMETERS.md) | Every model input, by physical category, with units and provenance |
 | [OUTPUTS.md](OUTPUTS.md) | Every returned quantity, function by function |
 | [STEADY_STATE.md](STEADY_STATE.md) | Why the model needs no time axis, and what would invalidate that |
-| [TRAPPING_VALIDATION.md](TRAPPING_VALIDATION.md) | Zero-free-parameter TDS validation of the trapping block, plus equation appendices |
 | [PACKAGING_1.0.0.md](PACKAGING_1.0.0.md) | Scope and acceptance record for the container release |
 | `latex/Model_Equations.tex` | Every equation transcribed, with its `file → function` location |
 
@@ -240,10 +254,8 @@ pinned reference values through the real solvers and is study-aware.
 | Nemanic et al. 2023 | Cr₂O₃ transport properties |
 | Stover 1986 | Cr₂O₃ activation energies |
 | Grant et al. 1988 | Surface dissociation rate constants |
-| Lu et al. 2022 | Trap binding energies (TDS) |
-| Zhu et al. 2021 | Grain size and dislocation density (EBSD) |
-| Young et al. 1997 | M₆C carbide trap density |
-| Oriani 1970 | Local-equilibrium trapping model |
+| Zhu et al. 2021 | Grain size (EBSD) |
+| Oriani 1970 | Local-equilibrium trapping; why it leaves steady flux unchanged ([STEADY_STATE.md](STEADY_STATE.md)) |
 | Strehlow & Savage 1974 | Parallel-path transport through defective coatings |
 
 Full bibliography in `latex/references.bib` (32 entries).

@@ -1,0 +1,64 @@
+"""The Level 2b oxide/metal interface solve at the edges of the SA ranges.
+
+Log-uniform sampling puts half the P_upstream draws below 1 Pa and reaches 1 nm
+oxides at 1e7 Pa. There the root can be far below any fixed absolute tolerance, or
+too close to either pressure limit for brentq to bracket. Each case is checked
+against the exact root of the quadratic in sqrt(P_int).
+"""
+import numpy as np
+import pytest
+
+from calculations.interface_solver import calculate_oxide_metal_system
+
+
+def exact(P_up, P_down, ox, m):
+    """Root of the quadratic in u = sqrt(P_int) - sqrt(P_down), the variable
+    that keeps J = b u free of cancellation."""
+    a = ox['D_ox'] * ox['K_ox'] / ox['thickness']
+    b = m['D_metal'] * m['K_s_metal'] / m['thickness']
+    sd = np.sqrt(P_down)
+    beta = b + 2 * a * sd
+    u = 2 * a * (P_up - P_down) / (beta + np.sqrt(beta ** 2 + 4 * a * a * (P_up - P_down)))
+    return (sd + u) ** 2, b * u
+
+
+CASES = {
+    # P_int ~ 1e-14 Pa: below a 1e-12 Pa absolute tolerance
+    'low pressure': (1e-6, 0.0, {'D_ox': 1e-16, 'K_ox': 1.0, 'thickness': 1e-6},
+                     {'D_metal': 1e-9, 'K_s_metal': 0.05, 'thickness': 1e-3}),
+    # oxide so permeable that P_up - P_int < 1e-10 P_up: root above the bracket
+    'metal-dominated': (1e7, 0.0, {'D_ox': 1e-15, 'K_ox': 300.0, 'thickness': 1e-9},
+                        {'D_metal': 1e-12, 'K_s_metal': 0.05, 'thickness': 5e-3}),
+    # oxide so tight that P_int < 1e-10 P_up: root below the bracket
+    'oxide-dominated': (1e-5, 0.0, {'D_ox': 1e-22, 'K_ox': 1e-3, 'thickness': 1e-5},
+                        {'D_metal': 1e-8, 'K_s_metal': 0.05, 'thickness': 1e-4}),
+    # oxide-dominated with P_down > 0: P_int is next to P_down, so
+    # b*(sqrt(P_int) - sqrt(P_down)) would cancel to 0 (PR #2 review)
+    'oxide-dominated, P_down > 0': (1e-5, 1e-6, {'D_ox': 1e-20, 'K_ox': 1.0, 'thickness': 1.0},
+                                    {'D_metal': 5e-6, 'K_s_metal': 1.0, 'thickness': 1.0}),
+    'ordinary': (1e5, 10.0, {'D_ox': 1e-17, 'K_ox': 287.0, 'thickness': 1e-6},
+                 {'D_metal': 2e-10, 'K_s_metal': 0.058, 'thickness': 1e-3}),
+}
+
+
+@pytest.mark.parametrize("case", list(CASES))
+def test_interface_matches_exact_root(case):
+    P_up, P_down, ox, m = CASES[case]
+    r = calculate_oxide_metal_system(P_up, P_down, ox, m)
+    P_int, J = exact(P_up, P_down, ox, m)
+    assert r['P_interface'] == pytest.approx(P_int, rel=1e-6, abs=0)
+    assert r['flux'] == pytest.approx(J, rel=1e-6, abs=0)
+
+
+def test_random_walls_across_sa_ranges():
+    rng = np.random.default_rng(0)
+    for _ in range(500):
+        ox = {'D_ox': 10 ** rng.uniform(-20, -14), 'K_ox': 10 ** rng.uniform(-2, 3),
+              'thickness': 10 ** rng.uniform(-9, -5)}
+        m = {'D_metal': 10 ** rng.uniform(-12, -7),
+             'K_s_metal': 10 ** rng.uniform(-3, 0),
+             'thickness': 10 ** rng.uniform(-4, -2.3)}
+        P = 10 ** rng.uniform(-7, 7)
+        r = calculate_oxide_metal_system(P, 0.0, ox, m)
+        _, J = exact(P, 0.0, ox, m)
+        assert r['flux'] == pytest.approx(J, rel=1e-3, abs=0)

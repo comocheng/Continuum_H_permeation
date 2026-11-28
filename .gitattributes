@@ -1,12 +1,26 @@
+# Release archives carry the code only: the calculations/ package and the LICENSE.
+# GitHub builds a release's "Source code" zip with `git archive`, which honours export-ignore,
+# and Zenodo deposits that zip. Docs, Markdown, studies, notebooks, tests and the container stay
+# in the repository and in every clone; they are left out of the archive, not out of git.
+#
+# Everything is ignored first and the code is let back in. The directory line is needed as
+# well as the /** line: an ignored directory is skipped whole, whatever its contents say.
+* export-ignore
+/calculations -export-ignore
+/calculations/** -export-ignore
+/LICENSE -export-ignore
+
 # The effect-of sweep notebooks and the study comparison are committed WITHOUT their outputs.
 # Their figures are regenerable (the *-results/ folders are already gitignored for that reason),
 # and a full re-run rewrites ~190 MB of embedded images, which would land in the history again on
 # every commit. The working copy keeps its outputs; only the committed blob is stripped.
 #
-# The filter is defined per clone, in .git/config. Without it this line does nothing and the
-# notebooks are committed as they are, so set it up once in any clone you commit from:
+# The filter is tools/strip_notebook_outputs.py, defined in .gitconfig. Git does not read a
+# repository's own config file, so enable it once in any clone you commit from:
 #
-#   git config filter.strip-outputs.clean "jupyter nbconvert --ClearOutputPreprocessor.enabled=True --to=notebook --stdin --stdout --log-level=ERROR"
-#   git config filter.strip-outputs.required true
+#   git config --local include.path ../.gitconfig
+#
+# Without it these lines do nothing and the notebooks are committed with their outputs;
+# tests/test_committed_notebooks.py then fails on the staged copies.
 */effect-of-*.ipynb                 filter=strip-outputs
 Comparisons/study-comparison.ipynb  filter=strip-outputs

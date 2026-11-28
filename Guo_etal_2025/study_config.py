@@ -67,15 +67,11 @@ CONDITIONS = {
 # HOW THE MODEL IS RUN — not data, and not a property of anything.
 # -----------------------------------------------------------------------------
 MODEL_OPTIONS = {
-    # Level 4: trap grain boundaries as well as enhancing diffusion along them.
-    'enable_gb_as_trap':    False,
     # Level 3: treat a pinhole as fast metal kinetics (Sieverts) rather than using the
     # metal's own surface kinetics.
     'use_sieverts_pinhole':   False,
-    # Level 4, read by the model wrappers.
+    # Level 4, read by the model wrappers: grain-boundary fast paths in the metal.
     'enable_gb_enhancement': True,
-    'enable_trapping':       True,
-    'D_eff_method':           'average',
 }
 
 # =============================================================================
@@ -97,12 +93,14 @@ OXIDE_DEFECTS = {
 }
 
 # -----------------------------------------------------------------------------
-# SUGGESTED PARAMETER RANGES — Level 5 (28 parameters)   ** TUNE ME **
+# SUGGESTED PARAMETER RANGES — Level 5 (19 parameters)   ** TUNE ME **
 # -----------------------------------------------------------------------------
 SUGGESTED_RANGES_LEVEL5 = {
-    # Metal transport (Incoloy 802, Schmidt 1985)
-    'D_ref':        [4.285e-11, 4.285e-7],
-    'E_D':          [50000, 80000],
+    # Metal transport (316L, Guo 2025). Pre-exponential +/- 2 decades and
+    # activation energy +/- 15 kJ/mol about the METALS defaults (2.8e-11 m2/s,
+    # 52.1 kJ/mol at T_ref = 673 K), so the defaults sit mid-range.
+    'D_ref':        [2.8e-13, 2.8e-9],
+    'E_D':          [37000, 67000],
     'K_s_ref':      [1e-4, 0.1],
     'H_s':          [1000, 50000],
   
@@ -128,25 +126,14 @@ SUGGESTED_RANGES_LEVEL5 = {
     # Grain structure
     'grain_size':      [1e-5, 5e-4],
     'gb_thickness':    [3e-10, 1e-9],
-    'lattice_density': [8e28, 1.2e29],
-
-    # Traps (Lu 2022 + Young 1997; narrowed to physically motivated bounds)
-    'trap_dislocation_E_b': [15000, 25000],
-    'trap_dislocation_N_T': [8.16e10, 8.16e14],
-    'trap_gb_E_b':          [25000, 30000],
-    'trap_gb_N_T':          [6e12, 6e16],
-    'trap_vacancy_E_b':     [35000, 50000],
-    'trap_vacancy_N_T':     [1e24, 1e28],
-    'trap_carbide_E_b':     [20000, 40000],
-    'trap_carbide_N_T':     [2e23, 2e27],
 
     # Operating conditions
     'temperature': list(CONDITIONS['T_range']),
 }
 
 # -----------------------------------------------------------------------------
-# SUGGESTED PARAMETER RANGES — Level 5L6 (36 parameters)   ** TUNE ME **
-# Inherits all 28 Level 5 ranges and adds the surface-kinetics parameters.
+# SUGGESTED PARAMETER RANGES — Level 5L6 (27 parameters)   ** TUNE ME **
+# Inherits all 19 Level 5 ranges and adds the surface-kinetics parameters.
 # -----------------------------------------------------------------------------
 SUGGESTED_RANGES_LEVEL5L6 = {
     **SUGGESTED_RANGES_LEVEL5,
@@ -155,9 +142,10 @@ SUGGESTED_RANGES_LEVEL5L6 = {
     'E_diss':              [40000, 70000],
     'K_eq_ref':            [1e-6, 1e-2],
     'H_eq':                [5000, 50000],
-    # Metal surface kinetics (Grant 1988)
-    'k_diss_metal_ref':    [1.346e-8, 1.346e-4],
-    'E_diss_metal':        [70000, 100000],
+    # Metal surface kinetics, centred on the 316L defaults (2.63e-11 mol/m2/s/Pa,
+    # 55.0 kJ/mol at T_ref = 673 K), as the other studies centre on theirs.
+    'k_diss_metal_ref':    [2.6287e-13, 2.6287e-9],
+    'E_diss_metal':        [40000, 70000],
     'K_eq_metal_ref':      [1e-5, 1e-1],
     'H_eq_metal':          [5000, 40000],
 }
@@ -194,7 +182,7 @@ _SA_SLOW_OXIDE    = {'oxide_thickness': [1e-7, 1e-5],
 
 # thin, fast metal -> the metal is NOT limiting
 _SA_FAST_METAL    = {'metal_thickness': [5e-5, 5e-4],
-                     'D_ref':           [4.3e-8, 4.3e-7]}
+                     'D_ref':           [2.8e-10, 2.8e-9]}   # top decade of D_ref
 
 # suppress the defect bypass so flux must cross the intact oxide
 _SA_DEFECTS_OFF   = {'f_pinhole':   [1e-7, 1e-5],
@@ -213,7 +201,7 @@ _SA_FAST_SURFACE  = {'P_upstream':  [1e4, 1e7],
 # L5L6 only — slow surface (low pressure + slow dissociation on oxide and metal)
 _SA_SLOW_SURFACE  = {'P_upstream':       [1e-7, 1e1],
                      'k_diss_ref':       [9.5e-12, 9.5e-9],
-                     'k_diss_metal_ref': [1.3e-10, 1.3e-7]}
+                     'k_diss_metal_ref': [2.6e-15, 2.6e-12]}  # 1e-4..1e-1 x default
 
 REGIME_PRESETS = {
     'metal':   _sa_ranges_with(SUGGESTED_RANGES_LEVEL5L6, {}),
@@ -347,37 +335,4 @@ MICROSTRUCTURE = {
     'gb_thickness':        0.5e-9,      # m  (unchanged -- no Has-N measurement)
     'grain_shape':         'equiaxed',  # confirmed Zhu 2021
     'gb_type':             'LAGB',     # ~50% Sigma3 (0 eV) + ~50% HAGB (0.27 eV)
-    'enable_gb_as_trap': MODEL_OPTIONS['enable_gb_as_trap'],
-
-    'trap_list': [
-        {
-            'name':           'vacancies',
-            'binding_energy': 0.43 * F,  # J/mol  (Ni est. vs placeholder 0.50)
-            'density':        1e26,       # m^-3   (no Has-N data -- keep)
-        },
-        {
-            'name':           'dislocations',
-            'binding_energy': 0.20 * F,  # J/mol  (Lu 2022: 0.186-0.215 eV, was 0.70)
-            'density':        8.16e12,   # m^-3   (Zhu 2021 GND, was 1e22 -- 4 orders too high)
-        },
-        {
-            'name':           'grain_boundaries',
-            'binding_energy': 0.27 * F,  # J/mol  (Lu 2022 Peak 2: 0.258-0.281, was 0.90)
-            'density':        6e14,      # m^-3   (geometric from 100 um grain, was 1e24)
-        },
-        {
-            'name':           'Carbides',
-            'binding_energy': 0.27 * F,  # J/mol  (M6C Lu 2022: 0.258-0.281, was 0.0)
-            'density':        2e25,      # m^-3   (Young 1997 upper bound, was 0)
-        },
-    ],
-
-
-    # -------------------------------------------------------------------
-    # LATTICE SITE DENSITY
-    # -------------------------------------------------------------------
-    'lattice_density':     8.774e28,     # m⁻³ — Fe BCC; update for your alloy
 }
-
-
-MICROSTRUCTURE['N_L'] = MICROSTRUCTURE['lattice_density']

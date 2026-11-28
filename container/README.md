@@ -187,7 +187,7 @@ model, and two of the changes move numbers:
   than beside the notebook.
 - **Three studies ship, one folder each.** `Guo_etal_2025/`, `Fuerst_et_al_2024/`
   and `incoloy802_cr2o3/`, each self-contained. A fourth folder, `Application/`,
-  was withdrawn on 2026-09-28: its `study_config.py` was a delivery copy of the Guo
+  was withdrawn on 2026-09-28 and deleted from the repository on 2026-11-27: its `study_config.py` was a delivery copy of the Guo
   study — identical bar the docstring, same `STUDY_NAME` — so it advertised a fourth
   study that reproduced a third one's numbers. Use `Guo_etal_2025/` for 316L / Cr2O3.
 - **The derived parameter block lives in one place.** It used to be duplicated
