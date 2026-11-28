@@ -57,21 +57,21 @@ def study(d, sensitivity=True):
               [['J', '1e5 Pa', 'single fit', '573–1273', 40, 61.75, 0.1, 'mol/m^2/s']])
     write_csv(os.path.join(d, 'effect-of-temperature-results', 'L5L6_arrhenius_fits.csv'), FIT_HEAD,
               [['J', '1e5 Pa', 'single fit', '573–1273', 40, 136.2, 57.3, 'mol/m^2/s'],
-               ['J', '1e5 Pa', 'Pinholes dominant: metal-diffusion limited, trap-controlled', '573–717', 9, 88.8, 0.0058, 'mol/m^2/s'],
-               ['J', '1e5 Pa', 'Intact oxide dominant: oxide-diffusion limited', '730–900', 14, 210.0, 1e3, 'mol/m^2/s']])
+               ['J', '1e5 Pa', 'Pinholes dominant: metal-diffusion controlled', '573–717', 9, 88.8, 0.0058, 'mol/m^2/s'],
+               ['J', '1e5 Pa', 'Intact oxide dominant: oxide-diffusion controlled', '730–900', 14, 210.0, 1e3, 'mol/m^2/s']])
     tiny_png(os.path.join(d, 'effect-of-pressure-results', 'L5L6_pressure.png'))
     write_csv(os.path.join(d, 'effect-of-pressure-results', 'L5L6_pressure_fits.csv'), P_HEAD,
               [['J', '873 K', 'net (whole range)', '1.0e-07–1.0e+07', 40, 0.7588, ''],
-               ['J', '873 K', 'Intact oxide dominant: oxide-surface limited', '1.0e-07–6.6e-01', 20, 0.991, 2.1e-9],
-               ['J', '873 K', 'Intact oxide dominant: oxide-diffusion limited', '3.5e+00–1.0e+07', 19, 0.513, 2.5e-9]])
+               ['J', '873 K', 'Intact oxide dominant: oxide-surface controlled (H$_2$ dissociation on the oxide)', '1.0e-07–6.6e-01', 20, 0.991, 2.1e-9],
+               ['J', '873 K', 'Intact oxide dominant: oxide-diffusion controlled', '3.5e+00–1.0e+07', 19, 0.513, 2.5e-9]])
     # Level 1 has one layer: its metal sweep only. Level 2b has both: oxide, metal and the whole wall.
     tiny_png(os.path.join(d, 'effect-of-thickness-results', 'L1_thickness_metal.png'))
     write_csv(os.path.join(d, 'effect-of-thickness-results', 'L1_thickness_fits.csv'), L_HEAD,
-              [['J', 'metal', '873 K, 1e5 Pa', 'Metal-diffusion limited', '1.00e-04–5.00e-03', 40, -1.0, 4.3e-9]])
+              [['J', 'metal', '873 K, 1e5 Pa', 'Metal-diffusion controlled', '1.00e-04–5.00e-03', 40, -1.0, 4.3e-9]])
     for sweep in ('oxide', 'metal', 'total'):
         tiny_png(os.path.join(d, 'effect-of-thickness-results', f'L2b_thickness_{sweep}.png'))
     write_csv(os.path.join(d, 'effect-of-thickness-results', 'L2b_thickness_fits.csv'), L_HEAD,
-              [['J', sweep, '873 K, 1e5 Pa', 'Oxide-diffusion limited', '1.00e-09–1.00e-05', 40, -0.9, 4e-10]
+              [['J', sweep, '873 K, 1e5 Pa', 'Oxide-diffusion controlled', '1.00e-09–1.00e-05', 40, -0.9, 4e-10]
                for sweep in ('oxide', 'metal', 'total')])
     write_csv(os.path.join(d, 'effect-of-pinholes-results', 'L3L6_pinholes_paths.csv'),
               ['level', 'T (K)', 'P_up (Pa)', 'f', 'label', 'dominant_path', 'J_total', 'PRF', 'f_half'],
@@ -80,7 +80,7 @@ def study(d, sensitivity=True):
                ['L3L6', 873, 1e5, 0.5, 'pinholes/metal', 'pinholes', 8e-7, 0.5, 0.667]])
     write_csv(os.path.join(d, 'effect-of-pinholes-results', 'L3L6_pinholes_fits.csv'),
               ['quantity', 'condition', 'fit', 'f window', 'points', 'n (J, Φ_app ∝ f^n)', 'A (SI)'],
-              [['J', '873 K, 1e5 Pa', 'Intact oxide dominant: oxide-diffusion limited', '1e-5–0.5', 40, -0.0004, 9.6e-7]])
+              [['J', '873 K, 1e5 Pa', 'Intact oxide dominant: oxide-diffusion controlled', '1e-5–0.5', 40, -0.0004, 9.6e-7]])
     if sensitivity:
         write_csv(os.path.join(d, 'sa_results', 'delta_over_floor_by_T.csv'),
                   ['regime', 'parameter', '773K', '1073K', 'best'],

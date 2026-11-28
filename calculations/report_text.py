@@ -18,7 +18,7 @@ LEVELS = [
     ('L2a', 'Level 2a --- perfect oxide'),
     ('L2b', 'Level 2b --- oxide and metal in series'),
     ('L3', 'Level 3 --- defective oxide'),
-    ('L4', 'Level 4 --- defective metal (grain boundaries and traps)'),
+    ('L4', 'Level 4 --- defective metal (grain boundaries)'),
     ('L5', 'Level 5 --- full system'),
     ('L1L6', 'Level 1 + surface kinetics'),
     ('L2aL6', 'Level 2a + surface kinetics'),
@@ -39,14 +39,16 @@ CONVENTIONS = r"""
 \item \textbf{Two models.} Levels 1--5 are Model 1 (a Henry-law oxide, no surface step); the L6 family is
   Model 2 (surface dissociation and recombination, a Sieverts oxide). Compare across the two with care: a
   difference mixes the surface kinetics with the change of oxide law.
-\item \textbf{Regimes} are named by the largest resistance fraction (surface, oxide, metal, or defect paths).
-  The resistance fractions of a level sum to 1.
+\item \textbf{Regimes} are named by the largest degree of rate control $X_k = \partial\ln J/\partial\ln k$ (surface,
+  oxide, metal, or defect paths); for steps in series it is the step\textquotesingle s share of the resistance. The
+  fractions of a level sum to 1.
 \item \textbf{Apparent permeability} $\Phi_\mathrm{app} = J\,L/\Delta\sqrt{P}$ ($\Delta P$ for L2a) is a material
   property only where thickness-proportional Sieverts transport controls; elsewhere it depends on the operating point.
 \item \textbf{PRF}, the permeation reduction factor: at Level 5, bare-metal flux over the coated wall's flux; in the
   pinhole sweep, $J_p/J_i$, pinhole path over intact oxide.
 \item \textbf{Fits.} The figures draw one fit per regime, over the window where that regime holds, named by its
-  dominant path and limiting step. Two whole-sweep values are in the tables only, never drawn: the \emph{single fit}
+  dominant path and the process controlling the wall\textquotesingle s rate (whole-wall $X_k > 0.5$; otherwise
+  \emph{mixed control}, drawn but not fitted). Two whole-sweep values are in the tables only, never drawn: the \emph{single fit}
   of the temperature sweep (one Arrhenius fit over every temperature) and the \emph{net} $n$ of the pressure sweep
   ($\Delta\ln J/\Delta\ln P$ between the two ends of the range, the average local exponent, not a fitted line).
 \item \textbf{``--''} in a table is a value the study does not have.
@@ -56,7 +58,7 @@ CONVENTIONS = r"""
 SUMMARY = {
     'title': 'Run summary',
     'docs': [
-        ('docs/index.md', 'Where to start', 'the documentation, by question'),
+        ('docs/index.md', 'Reading order', 'the documentation, by question'),
         ('docs/getting-started.md', 'The model hierarchy', 'the levels L1--L6 the sections below follow'),
         ('docs/theory/two-models.md', 'The fork', 'why L1--L5 and the L6 family are two models, not six levels'),
         ('docs/config-file.md', 'One study, one file', r'the \texttt{study\_config.py} this report is about'),
@@ -76,18 +78,19 @@ SECTIONS = {
     'levels': {
         'title': 'Levels 1--5: the transport hierarchy (Model 1)',
         'goal': r'Build the wall up one physical effect at a time --- bulk metal, an oxide layer, defects in the '
-                r'oxide, grain boundaries and traps in the metal, then all together --- and see which effect '
+                r'oxide, grain boundaries in the metal, then all together --- and see which effect '
                 r'controls the flux at the operating point (\path{Proposal.ipynb}).',
         'docs': [
-            ('docs/theory/level1-metal.md', 'What it models', "Sieverts' law and Fick diffusion"),
-            ('docs/theory/level2-oxide.md', 'Level 2a — the perfect oxide', "a Henry-law oxide"),
-            ('docs/theory/level2-oxide.md', 'Level 2b — oxide and metal in series', 'the interface-pressure solve'),
+            ('docs/theory/level1-metal.md', 'The flux law', "Sieverts' law and Fick diffusion"),
+            ('docs/theory/level2-oxide.md', "Henry's law, not Sieverts", "a Henry-law oxide"),
+            ('docs/theory/level2-oxide.md', 'The coupling', 'the interface-pressure solve'),
             ('docs/theory/level2-oxide.md', 'Reading the regime', 'the resistance ratio'),
             ('docs/theory/level3-defective-oxide.md', 'The parallel-path model', 'pinholes, cracks, grain boundaries'),
-            ('docs/theory/level4-microstructure.md', 'Two effects, applied in sequence', 'grain-boundary enhancement, then trapping'),
+            ('docs/theory/level4-microstructure.md', 'One effect: grain boundaries as fast paths', 'grain-boundary enhancement'),
+            ('docs/theory/level4-microstructure.md', 'Why there is no trapping', 'why traps do not change the steady flux'),
             ('docs/theory/level5-full-system.md', 'The assembly', 'how Levels 3 and 4 combine'),
             ('docs/theory/level5-full-system.md', 'Reading the resistance fractions', 'what the fractions and regime mean'),
-            ('docs/theory/level5-full-system.md', 'Values at the default operating point', 'the documented values, to compare with'),
+            ('docs/theory/level5-full-system.md', 'Worked values at the default operating point', 'the documented values, to compare with'),
             ('docs/caveats.md', 'Level 5 is metal-limited, so the oxide barely matters — but Level 5L6 is not',
              'why the two full systems disagree'),
         ],
@@ -111,17 +114,20 @@ SECTIONS = {
             {'key': 'L3', 'caption': 'Level 3: defective oxide.',
              'panels': [('(A)--(C)', 'The wall with oxide defects, against pressure, temperature and defect fraction.', '',
                          [('the curve meeting Level 1', 'the defects bypass the oxide')]), _LIMIT]},
-            {'key': 'L4', 'caption': 'Level 4: defective metal (grain boundaries and traps).',
-             'panels': [('(A)--(C)', 'The metal with grain-boundary enhancement and trapping, against its parameters.', '',
-                         [('flux below Level 1', 'traps slow transport more than grain boundaries speed it')]), _LIMIT]},
+            {'key': 'L4', 'caption': 'Level 4: defective metal (grain-boundary enhancement).',
+             'panels': [('(A)--(C)', 'The metal with grain-boundary enhancement against pressure, temperature and grain '
+                         'size, beside Level 1.', '',
+                         [('flux on top of Level 1', 'grain boundaries add little at this grain size and boundary type'),
+                          ('flux rising as the grains shrink', 'more boundary area: the fast path carries more')]), _LIMIT]},
             {'key': 'L5', 'caption': 'Level 5: the full system (defective oxide + defective metal).',
              'panels': [('(A)', 'Every level against pressure at the operating temperature.', '',
                          [('Level 5 on top of one lower level', 'the effect of that level controls the system there')]),
                         ('(B)', 'Arrhenius plot of Levels 1, 2b and 5, with activation energies.', '',
                          [('a bend', 'control passing from one step to another with temperature')]),
-                        ('(C)', 'Oxide against metal effects: flux with no microstructure, grain boundaries only, traps '
-                         'only, and both, at each oxide defect fraction.', '',
-                         [('traps-only and combined bars equal', 'trapping dominates the microstructure effect')]),
+                        ('(C)', 'Oxide against metal effects: flux with no microstructure and with grain-boundary '
+                         'enhancement, at each oxide defect fraction.', '',
+                         [('the two bars equal', 'grain boundaries do not change the flux at this point'),
+                          ('bars rising with the defect fraction', 'the oxide defects, not the metal, set the flux')]),
                         ('(D)', r'Limit checks: Level 5 with $f \to 0$ against Level 2b, and $f \to 1$ against Level 1.', '',
                          [('points off the line', 'a limit is not recovered')])]},
         ],
@@ -139,7 +145,7 @@ SECTIONS = {
             ('docs/theory/level6-surface-kinetics.md', 'Reading coverage', r'$\theta$ against the isotherm'),
             ('docs/theory/level6-surface-kinetics.md', 'The full system: L5L6', 'the full Model 2 system'),
             ('docs/theory/equilibrium-models.md', 'Why Langmuir and Sieverts do not conflict', 'the two equilibrium laws'),
-            ('docs/caveats.md', '`rate_limiting` and `fraction_surface` do not measure what the surface cost',
+            ('docs/caveats.md', '`fraction_surface` is local: it measures what speeding the surface up would gain',
              'why a small surface fraction does not mean a small surface effect'),
             ('docs/caveats.md', '`PRF` is `nan` from the Level 5L6 wrapper', 'the missing PRF of L5L6'),
             ('docs/caveats.md', 'L5-vs-L5L6 differences mix surface kinetics with a change of oxide law',
@@ -157,9 +163,9 @@ SECTIONS = {
                          'for the simplest levels; for the others, the effect of the level\\textquotesingle s own ingredient '
                          '--- the oxide against temperature, the defect fraction, or the metal microstructure.', '',
                          [(r'$\theta$ below $\theta_\mathrm{eq}$', 'fast diffusion empties the surface faster than it fills'),
-                          (r'$D_\mathrm{eff}/D_m$ below 1', 'trapping slows transport more than grain boundaries speed it'),
+                          (r'$D_\mathrm{eff}/D_m$ close to 1', 'grain boundaries barely speed transport at this grain size'),
                           ('a curve that stays flat across the defect fraction', 'the defects do not open a faster path at this point')]),
-                        ('(C) Rate-limiting step', 'The resistance fraction of each step against pressure.', '',
+                        ('(C) Rate-limiting step', 'The degree of rate control (resistance fraction) of each step against pressure.', '',
                          [('the curves crossing at 50\\,\\%', 'the crossover pressure between surface and bulk control')]),
                         ('(D) Limit check', 'The level reduced to a simpler one: fast dissociation against no surface step, '
                          'or the microstructure switched off against the level without it.', '',
@@ -176,7 +182,7 @@ SECTIONS = {
             ('docs/how-to/parameter-sweeps.md', 'The temperature sweep: regime fits and the single fit',
              'what the figures draw, and what only the table gives'),
             ('docs/how-to/parameter-sweeps.md', 'Reading a table', 'every column of the fits tables'),
-            ('docs/theory/level1-metal.md', 'Temperature dependence', 'the activation energy of the perfect metal'),
+            ('docs/theory/level1-metal.md', 'The two signatures', 'the activation energy of the perfect metal'),
             ('docs/theory/permeability.md', 'Starting point: which model are you in?', 'what an apparent permeability means in each model'),
             ('docs/theory/two-models.md', 'What may be compared with what', 'which levels may be compared'),
             ('docs/caveats.md', '`permeability` is apparent and needs its operating point', r'why $\Phi_\mathrm{app}$ is not a material property'),
@@ -186,7 +192,8 @@ SECTIONS = {
             {'key': 'main', 'caption': 'Temperature sweep at the operating pressure: regime-resolved Arrhenius fits.',
              'panels': [('Flux (top) and $\\Phi_\\mathrm{app}$ (bottom)', r'Against $1000/T$, coloured by regime, with one '
                          'Arrhenius fit per regime window.',
-                         'Marker and colour name the dominant path and the limiting step; each fit, and the single fit '
+                         'Marker and colour name the dominant path and the process controlling the wall\\textquotesingle s rate; each '
+                         'fit, and the single fit '
                          'over every temperature, is in the table.',
                          [('a steeper segment', 'a step with a higher activation energy controls there'),
                           ('a change of marker', 'the dominant path changes, for instance from intact oxide to pinholes'),
@@ -211,7 +218,7 @@ SECTIONS = {
             ('docs/how-to/parameter-sweeps.md', 'Why not one least-squares line over the whole range',
              'why the net $n$ replaces a single fit'),
             ('docs/how-to/parameter-sweeps.md', 'Reading the two together', 'what a net $n$ between the regime values means'),
-            ('docs/theory/level1-metal.md', 'The √P signature', '$n = 0.5$ for Sieverts transport'),
+            ('docs/theory/level1-metal.md', 'The two signatures', '$n = 0.5$ for Sieverts transport'),
             ('docs/theory/level2-oxide.md', "Henry's law, not Sieverts", '$n = 1$ for a Henry oxide'),
             ('docs/theory/level6-surface-kinetics.md', 'The result that matters: the surface suppresses pressure, not flux directly',
              'the surface in a pressure sweep'),
@@ -311,7 +318,7 @@ _SA_DOCS = [
     ('docs/caveats.md', "The sweep range extrapolates past the oxide's validated window", 'the ranges of the scan'),
 ]
 _SA_COLUMNS = [
-    ('regime', 'the cluster: draws whose largest resistance is in that part of the wall.'),
+    ('regime', 'the cluster: draws whose largest degree of rate control is in that part of the wall.'),
     (r'$\delta$/floor at $T$', r'Borgonovo $\delta$ of the parameter for the flux, over the dummy parameter\textquotesingle s '
      r'$\delta$; above 1 the parameter is distinguishable from noise at that temperature.'),
     ('best', 'the largest of those ratios; the table lists parameters with best $\\ge 1$, highest first.'),

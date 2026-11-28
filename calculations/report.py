@@ -553,12 +553,12 @@ def section_sweep(rep, name):
         ('quantity', r'$J$, the flux, or $\Phi_\mathrm{app}$, the apparent permeability from the same flux.'),
         ('condition, window, points', 'where the sweep was made, and the range and number of points the fit used.'),
         ('fit', {'temperature': '\\emph{single fit}: one Arrhenius fit over every temperature, in the table only; '
-                                'otherwise one regime, named by its dominant path and limiting step.',
+                                'otherwise one regime, named by its dominant path and the process controlling the wall\\textquotesingle s rate.',
                  'pressure': r'\emph{net (whole range)}: the net exponent of the whole trend, '
                              r'$\Delta\ln J/\Delta\ln P$ between the two ends of the range --- the average of the local '
                              r'exponent, not a fitted line, so it has no prefactor and is not drawn; otherwise one regime, '
-                             'named by its dominant path and limiting step.'}.get(
-            name, 'one regime, named by its dominant path and limiting step.')),
+                             'named by its dominant path and the process controlling the wall\\textquotesingle s rate.'}.get(
+            name, 'one regime, named by its dominant path and the process controlling the wall\\textquotesingle s rate.')),
         (VALUE_HEAD[name].replace(r'\\', ' '), {'temperature': 'the activation energy of the Arrhenius fit.',
                                                 'pressure': '$n$ of $J = A\\,P^{\\,n}$.',
                                                 'thickness': '$m$ of $J \\propto L^{\\,m}$, for the swept layer.',
