@@ -58,6 +58,24 @@ The sensitivity notebooks additionally write scan CSVs into `sa_results*/`, whic
 also gitignored — the parallel-coordinates notebooks read those files and cannot
 regenerate them, so run the SA notebooks first.
 
+### Once per clone: commit notebooks without their outputs
+
+The `effect-of-*.ipynb` sweep notebooks in each study folder and
+`Comparisons/study-comparison.ipynb` are committed **without outputs**. With outputs they
+run 4–25 MB each, and every re-run would add that to the history again. Your working
+copies keep their outputs; only the committed copy is stripped, by a git clean filter
+(`tools/strip_notebook_outputs.py`, standard library only). `.gitattributes` names the
+notebooks and `.gitconfig` defines the filter, but git never runs a command from a
+repository's own files, so each clone has to opt in once, from the repository root:
+
+```bash
+git config --local include.path ../.gitconfig
+```
+
+Without this, `git add` commits the outputs, and `tests/test_committed_notebooks.py`
+fails until you enable the filter and re-add the notebook. To strip a notebook that was
+added before you enabled the filter, run `git add --renormalize <notebook>`.
+
 ---
 
 ## Repository Structure
