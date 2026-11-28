@@ -31,9 +31,8 @@ existing code bases. It answers four questions:
 3. A kinetic absorption step gives back today's model when absorption is fast. It
    adds an absorption-limited regime and fits the code's existing one-unknown solve.
 4. Each assumption gets a limit check, a relaxation test and an experimental
-   signature that could disprove it (section 9). One of them, trapping in the Level 4
-   steady-state flux, conflicts with standard theory unless $D$ and $K_s$ are
-   defined in a particular way (section 9.2).
+   signature that could disprove it (section 9). Trapping is not among them: it does
+   not change the steady-state flux, and Level 4 no longer includes it (section 9.2).
 
 # 1. Notation and counting
 
@@ -484,7 +483,7 @@ evidence can be shown:
 | L2a, L2b | the oxide carries $\mathrm{H_2}$ molecules (Henry) | the Model 2 oxide | $n \approx 0.5$ on an oxide-limited wall |
 | L2b | oxide/metal interface at Sieverts equilibrium | an interface kinetic step, with its rate swept | $J$ independent of oxide thickness although the oxide limits |
 | L3 | defect paths in parallel and independent (no spreading under a pinhole) | a 2D unit cell: one pinhole above a metal slab | coating effectiveness vs coverage disagrees with the area fractions |
-| L4 | grain boundaries as a parallel path; Oriani trapping | 1D diffusion with traps, run to steady state | see section 9.2 |
+| L4 | grain boundaries as a parallel path; no trapping (section 9.2) | 1D diffusion with traps, run to steady state | a steady flux that depends on trap density |
 | L5 | each defect path sits over its own patch of metal | the 2D unit cell, with $D_{eff}$ in the metal | -- |
 
 **Model 2 (the Level 6 family).**
@@ -513,25 +512,20 @@ $$
 which contains no trap parameter. Traps change how long the wall takes to reach this
 state (the time lag), not the state itself.
 
-Level 4 instead computes (`calculate_defective_metal_flux` in
-`calculations/permeation_calc.py`):
+Earlier versions of Level 4 multiplied the flux by an Oriani trap-reduced diffusivity,
 
 $$
-J = \frac{D_{eff}\,K_s\left(\sqrt{P_{up}} - \sqrt{P_{down}}\right)}{L},
-\qquad
-D_{eff} = \frac{D_L}{1 + \sum_i N_{T,i}K_i/N_L}.
+D_{eff} = \frac{D_L}{1 + \sum_i N_{T,i}K_i/N_L},
 $$
 
-The two agree only if $D_L$ (`D_ref`) is the trap-free lattice diffusivity **and** $K_s$
-is the total solubility, lattice plus trapped. Then $D_{eff}K_s = D_L K_{s,L}$ in the
-dilute-trap limit.
+paired with the lattice $K_s$. That counts trapping twice when $D$ and $K_s$ come from
+a time-lag permeation experiment, whose product is already the trap-free permeability.
+Trapping has since been removed: Level 4 is grain-boundary enhancement only, through
+`calculations.defective_metal.metal_diffusivity()`, and `tests/test_metal_diffusivity.py`
+fails if trap parameters reappear. The argument is in {doc}`../STEADY_STATE` and
+{doc}`../theory/level4-microstructure`.
 
-If $D$ and $K_s$ both come from a time-lag permeation experiment, both are apparent
-values, and their product is already the trap-free permeability. The code then applies
-trapping a second time. In the example on the Level 4 docs page the trapping term is
-0.354, so the flux comes out lower by a factor of 1.354 (26%).
-
-**Tests.**
+**Tests** that the steady flux is trap-free, as the model now assumes:
 
 - **Numerical:** run 1D diffusion with Oriani traps to steady state, with and without
   traps. The steady flux should be identical; only the time lag should differ.
@@ -549,7 +543,7 @@ trapping a second time. In the example on the Level 4 docs page the trapping ter
 | $J$ vs metal thickness | diffusion-limited ($J \propto 1/L$) vs surface- or absorption-limited ($J$ independent of $L$) |
 | apparent activation energy | $E_D + \Delta H_s$ (bulk) vs $E_{diss}$ (surface) |
 | impurity on and off | whether the surface takes part at all |
-| steady $J$ and time lag, different microstructures | Level 4 trapping (section 9.2) |
+| steady $J$ and time lag, different microstructures | that traps change the time lag but not the steady flux (section 9.2) |
 
 **Use data that was not used for fitting.** The study constants were calibrated on the
 sources behind the `Guo_etal_2025`, `Fuerst_et_al_2024` and `incoloy802_cr2o3` folders,

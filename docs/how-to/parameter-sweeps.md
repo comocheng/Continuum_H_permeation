@@ -32,10 +32,13 @@ controls; see {doc}`../caveats`.
 ## Regimes, and why each fit covers one regime
 
 Every simulated point is labelled with its **regime**: the path that carries most of
-the flux (intact oxide, pinholes, or the bare wall) and the step that limits it
-(surface dissociation, oxide diffusion, metal diffusion, lattice or trap-controlled).
-The labels come from `calculations.wall_labels`. A point where no single step limits
-is labelled "no single limiting step (not fitted)": it is drawn, never fitted.
+the flux (intact oxide, pinholes, cracks or oxide grain boundaries; *mixed paths* if
+none carries more than half) and the process controlling the whole wall's rate
+(oxide surface, metal surface, oxide diffusion or metal diffusion). The controlling
+process is the one whose whole-wall degree of rate control
+$X_k = \partial\ln J/\partial\ln k$ exceeds 0.5; where none does, the point is *mixed
+control*. The labels come from `calculations.wall_labels`. A point with mixed control,
+no dominant path, or a failed solve is drawn but never fitted.
 
 A power law or an Arrhenius law describes one controlling step. Across a change of
 regime the slope changes, so one line through every point describes none of them.
@@ -144,14 +147,16 @@ $$f_{1/2} = \frac{1}{1 + \mathrm{PRF}} .$$
 A PRF below 1 means the pinhole path passes less than the intact oxide, as when
 dissociation on the bare metal is slow; the flux then falls with $f$. The fits are
 $J \propto f^{\,n}$ per regime; the paths table, `<level>_pinholes_paths.csv`, gives every
-point's flux through each path, its share, its limiting step, the PRF and $f_{1/2}$.
+point's flux through each path, its share, each path's degrees of rate control and the
+process controlling it alone, the whole wall's (`X_*_wall`, `step_wall`), the PRF and
+$f_{1/2}$.
 
 ## Reading a figure
 
 - **Panels**: the flux above or left, $\Phi_{app}$ below or right, on log axes.
 - **The legend is outside the panels, on the right.** *Simulation*, level with the panels:
-  one marker per regime. Colour is the limiting step; a hollow marker means a defect path
-  carries most of the flux; a diamond means the metal is trap-controlled. *Lines*, below it
+  one marker per regime. Colour is the process controlling the wall's rate; a hollow
+  marker means a defect path carries most of the flux. *Lines*, below it
   at the bottom: the fit line, the reference slopes, and in a three-condition figure the line
   style of each condition.
 - **Reference slopes** (pressure figures): dashed lines through the middle point for
@@ -169,7 +174,7 @@ Every figure has a fits table beside it, `<figure>_fits.csv`, also shown in the 
 | `quantity` | `J`, the flux, or `Phi_app`, the apparent permeability |
 | `condition` | where the sweep was made: the operating point, or one of the three conditions |
 | `sweep` | thickness only: `oxide`, `metal` or `total` (the whole wall) |
-| `fit` | the regime fitted, by its dominant path and limiting step; or `single fit` (temperature), or `net (whole range)` (pressure) |
+| `fit` | the regime fitted, by its dominant path and controlling process; or `single fit` (temperature), or `net (whole range)` (pressure) |
 | window, `points` | the range the row covers and how many simulated points it contains |
 | exponent | $E_a$, $n$ or $m$ for the flux; for $\Phi_{app}$, its own slope |
 | `A` | the prefactor of the fit, SI units; empty on a `net (whole range)` row |
